@@ -3,6 +3,9 @@
  *
  * Manages batch sweeping of funds from ephemeral addresses back to the vault.
  * Supports both periodic (interval-based) and threshold-based consolidation.
+ *
+ * Privacy-hardened: uses randomized jitter and batched sweeps to prevent
+ * chain-analysis tools from fingerprinting consolidation patterns.
  */
 
 import type { StorageAdapter, ChainId, TokenId } from '../types/index.js';
@@ -17,7 +20,30 @@ import { ContextTagManager } from './context-tag.js';
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const CONSOLIDATION_STORAGE_KEY = 'aesp:consolidation';
-const DEFAULT_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours
+const DEFAULT_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours base interval
+
+/**
+ * Default jitter ratio applied to the base interval.
+ * A jitter of 0.3 means ±30%, so a 4-hour base becomes 2h48m – 5h12m.
+ */
+const DEFAULT_JITTER_RATIO = 0.3;
+
+/**
+ * Default maximum number of addresses consolidated per batch.
+ * When more addresses are eligible, they are split into multiple batches
+ * with random inter-batch delays to break temporal fingerprints.
+ */
+const DEFAULT_MAX_BATCH_SIZE = 5;
+
+/**
+ * Range (ms) for random delay between consecutive batches within a single
+ * consolidation run. [min, max].
+ */
+const DEFAULT_INTER_BATCH_DELAY_RANGE: [number, number] = [
+  10 * 60 * 1000,   // 10 minutes
+  60 * 60 * 1000,    // 60 minutes
+];
+
 const MAX_CONSOLIDATION_RECORDS = 1000;
 
 // ─── Consolidation Handler Interface ────────────────────────────────────────
@@ -39,11 +65,38 @@ export interface ConsolidationHandler {
   }): Promise<string>;
 }
 
+// ─── Consolidation Options ──────────────────────────────────────────────────
+
+/**
+ * Privacy-hardening options for consolidation scheduling.
+ */
+export interface ConsolidationPrivacyOptions {
+  /**
+   * Jitter ratio applied to the scheduling interval (0–1).
+   * E.g. 0.3 adds ±30% randomness to each tick.
+   * Default: 0.3
+   */
+  jitterRatio?: number;
+
+  /**
+   * Maximum addresses consolidated in a single on-chain batch.
+   * Larger sets are split into multiple batches with inter-batch delays.
+   * Default: 5
+   */
+  maxBatchSize?: number;
+
+  /**
+   * [min, max] milliseconds of random delay between consecutive batches.
+   * Default: [600_000, 3_600_000] (10m – 60m)
+   */
+  interBatchDelayRange?: [number, number];
+}
+
 // ─── Consolidation Scheduler ────────────────────────────────────────────────
 
 export class ConsolidationScheduler {
   private records: Map<string, ConsolidationRecord> = new Map();
-  private timers: Map<string, ReturnType<typeof setInterval>> = new Map();
+  private timers: Map<string, ReturnType<typeof setTimeout>> = new Map();
   private handler?: ConsolidationHandler;
 
   constructor(
@@ -59,8 +112,37 @@ export class ConsolidationScheduler {
     this.handler = handler;
   }
 
+  // ─── Jitter Utilities ─────────────────────────────────────────────────
+
   /**
-   * Schedule periodic consolidation for an agent.
+   * Apply random jitter to a base interval.
+   * Returns value in range [base * (1 - ratio), base * (1 + ratio)].
+   *
+   * @internal Exposed as static for testability.
+   */
+  static applyJitter(baseMs: number, jitterRatio: number): number {
+    const ratio = Math.max(0, Math.min(1, jitterRatio));
+    const min = baseMs * (1 - ratio);
+    const max = baseMs * (1 + ratio);
+    return Math.floor(min + Math.random() * (max - min));
+  }
+
+  /**
+   * Random integer in [min, max] range.
+   * @internal
+   */
+  static randomInRange(min: number, max: number): number {
+    return Math.floor(min + Math.random() * (max - min));
+  }
+
+  // ─── Scheduling ───────────────────────────────────────────────────────
+
+  /**
+   * Schedule periodic consolidation for an agent with privacy-hardening.
+   *
+   * Unlike a fixed `setInterval`, each tick uses a randomized delay
+   * (`setTimeout` chain with jitter) so the consolidation cadence is
+   * unpredictable on-chain.
    */
   scheduleConsolidation(params: {
     agentId: string;
@@ -69,28 +151,43 @@ export class ConsolidationScheduler {
     token?: TokenId;
     intervalMs?: number;
     policy?: PrivacyPolicy;
+    privacyOptions?: ConsolidationPrivacyOptions;
   }): void {
     const key = `${params.agentId}:${params.chain}`;
-    const interval = params.intervalMs ?? DEFAULT_INTERVAL_MS;
+    const baseInterval = params.intervalMs ?? DEFAULT_INTERVAL_MS;
+    const jitterRatio = params.privacyOptions?.jitterRatio ?? DEFAULT_JITTER_RATIO;
+    const maxBatchSize = params.privacyOptions?.maxBatchSize ?? DEFAULT_MAX_BATCH_SIZE;
+    const interBatchRange = params.privacyOptions?.interBatchDelayRange ?? DEFAULT_INTER_BATCH_DELAY_RANGE;
 
     // Clear existing timer
     this.cancelConsolidation(params.agentId, params.chain);
 
-    const timer = setInterval(async () => {
-      try {
-        await this.consolidateNow({
-          agentId: params.agentId,
-          chain: params.chain,
-          vaultAddress: params.vaultAddress,
-          token: params.token ?? 'native',
-        });
-      } catch (error) {
-        // Keep scheduler alive even if one run fails.
-        console.error('ConsolidationScheduler.scheduleConsolidation:', error);
-      }
-    }, interval);
+    const scheduleNext = () => {
+      const jitteredDelay = ConsolidationScheduler.applyJitter(baseInterval, jitterRatio);
+      const timer = setTimeout(async () => {
+        try {
+          await this.consolidateBatched({
+            agentId: params.agentId,
+            chain: params.chain,
+            vaultAddress: params.vaultAddress,
+            token: params.token ?? 'native',
+            maxBatchSize,
+            interBatchRange,
+          });
+        } catch (error) {
+          // Keep scheduler alive even if one run fails.
+          console.error('ConsolidationScheduler.scheduleConsolidation:', error);
+        }
+        // Schedule the next tick (recursive setTimeout for jitter)
+        if (this.timers.has(key)) {
+          scheduleNext();
+        }
+      }, jitteredDelay);
 
-    this.timers.set(key, timer);
+      this.timers.set(key, timer);
+    };
+
+    scheduleNext();
   }
 
   /**
@@ -100,13 +197,82 @@ export class ConsolidationScheduler {
     const key = `${agentId}:${chain}`;
     const timer = this.timers.get(key);
     if (timer) {
-      clearInterval(timer);
+      clearTimeout(timer);
       this.timers.delete(key);
     }
   }
 
+  // ─── Batched Consolidation ────────────────────────────────────────────
+
   /**
-   * Immediately consolidate all funded ephemeral addresses for an agent.
+   * Consolidate funded addresses in randomized batches.
+   *
+   * Splits eligible addresses into batches of `maxBatchSize` and inserts
+   * random delays between batches to defeat temporal fingerprinting.
+   * Each batch results in a separate `ConsolidationRecord`.
+   *
+   * @returns Array of consolidation records (one per batch).
+   */
+  async consolidateBatched(params: {
+    agentId: string;
+    chain: ChainId;
+    vaultAddress: string;
+    token: TokenId;
+    maxBatchSize?: number;
+    interBatchRange?: [number, number];
+  }): Promise<ConsolidationRecord[]> {
+    const maxBatchSize = params.maxBatchSize ?? DEFAULT_MAX_BATCH_SIZE;
+    const interBatchRange = params.interBatchRange ?? DEFAULT_INTER_BATCH_DELAY_RANGE;
+
+    const allAddresses = this.addressPool.getAddressesForConsolidation(
+      params.agentId,
+      params.chain,
+    );
+
+    if (allAddresses.length === 0) return [];
+
+    // Shuffle addresses to avoid deterministic ordering
+    const shuffled = [...allAddresses];
+    ConsolidationScheduler.shuffleArray(shuffled);
+
+    // Split into batches
+    const batches: typeof allAddresses[] = [];
+    for (let i = 0; i < shuffled.length; i += maxBatchSize) {
+      batches.push(shuffled.slice(i, i + maxBatchSize));
+    }
+
+    const results: ConsolidationRecord[] = [];
+    for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+      // Inter-batch delay (skip before first batch)
+      if (batchIdx > 0) {
+        const delay = ConsolidationScheduler.randomInRange(
+          interBatchRange[0],
+          interBatchRange[1],
+        );
+        await ConsolidationScheduler.sleep(delay);
+      }
+
+      const record = await this.consolidateSingleBatch({
+        agentId: params.agentId,
+        chain: params.chain,
+        vaultAddress: params.vaultAddress,
+        token: params.token,
+        addresses: batches[batchIdx],
+      });
+
+      if (record) {
+        results.push(record);
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * Immediately consolidate all funded ephemeral addresses for an agent
+   * in a single batch (no splitting, no delays).
+   *
+   * Use `consolidateBatched` for privacy-hardened consolidation.
    */
   async consolidateNow(params: {
     agentId: string;
@@ -121,12 +287,92 @@ export class ConsolidationScheduler {
 
     if (addresses.length === 0) return null;
 
+    return this.consolidateSingleBatch({
+      agentId: params.agentId,
+      chain: params.chain,
+      vaultAddress: params.vaultAddress,
+      token: params.token,
+      addresses,
+    });
+  }
+
+  /**
+   * Check if consolidation should be triggered based on threshold.
+   */
+  shouldConsolidate(
+    agentId: string,
+    chain: ChainId,
+    policy: PrivacyPolicy,
+  ): boolean {
+    const addresses = this.addressPool.getAddressesForConsolidation(agentId, chain);
+    return addresses.length >= policy.consolidationThreshold;
+  }
+
+  // ─── Query ─────────────────────────────────────────────────────────────
+
+  getConsolidationHistory(agentId: string): ConsolidationRecord[] {
+    return Array.from(this.records.values()).filter(
+      (r) => r.agentId === agentId,
+    );
+  }
+
+  getRecord(id: string): ConsolidationRecord | undefined {
+    return this.records.get(id);
+  }
+
+  // ─── Persistence ───────────────────────────────────────────────────────
+
+  async load(): Promise<void> {
+    const stored = await this.storage.get<ConsolidationRecord[]>(CONSOLIDATION_STORAGE_KEY);
+    if (stored) {
+      this.records.clear();
+      for (const r of stored) {
+        this.records.set(r.id, r);
+      }
+    }
+  }
+
+  async save(): Promise<void> {
+    await this.storage.set(
+      CONSOLIDATION_STORAGE_KEY,
+      Array.from(this.records.values()),
+    );
+  }
+
+  // ─── Cleanup ───────────────────────────────────────────────────────────
+
+  /**
+   * Stop all scheduled consolidations (for shutdown).
+   */
+  dispose(): void {
+    for (const [, timer] of this.timers) {
+      clearTimeout(timer);
+    }
+    this.timers.clear();
+  }
+
+  // ─── Internal ─────────────────────────────────────────────────────────
+
+  /**
+   * Consolidate a single batch of addresses.
+   * @internal
+   */
+  private async consolidateSingleBatch(params: {
+    agentId: string;
+    chain: ChainId;
+    vaultAddress: string;
+    token: TokenId;
+    addresses: import('../types/privacy.js').EphemeralAddress[];
+  }): Promise<ConsolidationRecord | null> {
+    const { addresses } = params;
+    if (addresses.length === 0) return null;
+
     const record: ConsolidationRecord = {
       id: generateUUID(),
       agentId: params.agentId,
       chain: params.chain,
       addresses: addresses.map((a) => a.address),
-      totalAmount: '0', // to be filled by handler
+      totalAmount: '0',
       token: params.token,
       status: 'pending',
       createdAt: new Date().toISOString(),
@@ -187,64 +433,30 @@ export class ConsolidationScheduler {
     try {
       await this.save();
     } catch (error) {
-      // Avoid unhandled rejection in interval-driven execution.
       console.error('ConsolidationScheduler.save:', error);
     }
+
     return record;
   }
 
   /**
-   * Check if consolidation should be triggered based on threshold.
+   * Fisher-Yates shuffle — in-place random permutation.
+   * @internal Exposed as static for testability.
    */
-  shouldConsolidate(
-    agentId: string,
-    chain: ChainId,
-    policy: PrivacyPolicy,
-  ): boolean {
-    const addresses = this.addressPool.getAddressesForConsolidation(agentId, chain);
-    return addresses.length >= policy.consolidationThreshold;
-  }
-
-  // ─── Query ─────────────────────────────────────────────────────────────
-
-  getConsolidationHistory(agentId: string): ConsolidationRecord[] {
-    return Array.from(this.records.values()).filter(
-      (r) => r.agentId === agentId,
-    );
-  }
-
-  getRecord(id: string): ConsolidationRecord | undefined {
-    return this.records.get(id);
-  }
-
-  // ─── Persistence ───────────────────────────────────────────────────────
-
-  async load(): Promise<void> {
-    const stored = await this.storage.get<ConsolidationRecord[]>(CONSOLIDATION_STORAGE_KEY);
-    if (stored) {
-      this.records.clear();
-      for (const r of stored) {
-        this.records.set(r.id, r);
-      }
+  static shuffleArray<T>(array: T[]): void {
+    for (let i = array.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const tmp = array[i];
+      array[i] = array[j];
+      array[j] = tmp;
     }
   }
-
-  async save(): Promise<void> {
-    await this.storage.set(
-      CONSOLIDATION_STORAGE_KEY,
-      Array.from(this.records.values()),
-    );
-  }
-
-  // ─── Cleanup ───────────────────────────────────────────────────────────
 
   /**
-   * Stop all scheduled consolidations (for shutdown).
+   * Promise-based delay.
+   * @internal Exposed as static for testability / mocking.
    */
-  dispose(): void {
-    for (const [, timer] of this.timers) {
-      clearInterval(timer);
-    }
-    this.timers.clear();
+  static sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }

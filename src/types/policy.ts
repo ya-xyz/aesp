@@ -113,6 +113,53 @@ export interface IAgentPolicyEngine {
   ): Promise<void>;
 }
 
+// ─── Critical Policy Change Classification ──────────────────────────────────
+
+/**
+ * Categories of policy changes that require elevated approval.
+ *
+ * - `budget_increase`: Raising any spending limit (per-tx, daily, weekly, monthly).
+ * - `allowlist_address_add`: Adding a new address to the allow list.
+ * - `allowlist_address_remove_all`: Clearing the allow list entirely (opens to all).
+ * - `scope_escalation`: Changing scope to a broader level (e.g., auto_payment → full).
+ * - `time_window_remove`: Removing a time-window restriction.
+ * - `min_balance_lower`: Lowering the minimum post-spend balance requirement.
+ * - `first_pay_review_disable`: Disabling first-payment human review.
+ * - `expiration_extend`: Extending or removing a policy expiration date.
+ */
+export type CriticalPolicyChangeType =
+  | 'budget_increase'
+  | 'allowlist_address_add'
+  | 'allowlist_address_remove_all'
+  | 'scope_escalation'
+  | 'time_window_remove'
+  | 'min_balance_lower'
+  | 'first_pay_review_disable'
+  | 'expiration_extend';
+
+/**
+ * Approval level required for a policy change.
+ *
+ * - `auto`:      No escalation needed; change is non-critical.
+ * - `review`:    Change should be displayed to the user for confirmation.
+ * - `biometric`: Change requires mobile biometric (Face ID / fingerprint) confirmation.
+ */
+export type PolicyApprovalLevel = 'auto' | 'review' | 'biometric';
+
+/**
+ * Result of classifying a policy change against the existing policy.
+ */
+export interface PolicyChangeClassification {
+  /** Whether the change requires escalation beyond auto-approval. */
+  requiresEscalation: boolean;
+  /** The highest approval level needed. */
+  approvalLevel: PolicyApprovalLevel;
+  /** List of detected critical changes. */
+  criticalChanges: CriticalPolicyChangeType[];
+  /** Human-readable reasons for escalation. */
+  reasons: string[];
+}
+
 // ─── Audit ───────────────────────────────────────────────────────────────────
 
 export interface AuditEntry {

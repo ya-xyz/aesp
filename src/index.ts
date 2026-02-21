@@ -106,7 +106,7 @@ export {
   ContextTagManager,
   ConsolidationScheduler,
 } from './privacy/index.js';
-export type { ArweaveUploader, AuditNFTMinter, ConsolidationHandler } from './privacy/index.js';
+export type { ArweaveUploader, AuditNFTMinter, ConsolidationHandler, ConsolidationPrivacyOptions } from './privacy/index.js';
 
 // ─── Version ─────────────────────────────────────────────────────────────────
 export const AESP_VERSION = '0.1.0';

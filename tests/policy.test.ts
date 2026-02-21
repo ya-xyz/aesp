@@ -411,4 +411,195 @@ describe('Policy Module', () => {
       expect(budget?.dailySpent).toBe(100);
     });
   });
+
+  // ─── Policy Change Classification ─────────────────────────────────────
+
+  describe('PolicyEngine.classifyPolicyChange', () => {
+    let engine: PolicyEngine;
+
+    beforeEach(() => {
+      engine = new PolicyEngine(storage);
+    });
+
+    it('should return auto for brand-new policy (no existing)', () => {
+      const newPolicy = createTestPolicy();
+      const result = engine.classifyPolicyChange(newPolicy);
+      expect(result.requiresEscalation).toBe(false);
+      expect(result.approvalLevel).toBe('auto');
+      expect(result.criticalChanges).toHaveLength(0);
+    });
+
+    it('should return auto for non-existing existingPolicyId', () => {
+      const newPolicy = createTestPolicy();
+      const result = engine.classifyPolicyChange(newPolicy, 'nonexistent');
+      expect(result.requiresEscalation).toBe(false);
+      expect(result.approvalLevel).toBe('auto');
+    });
+
+    it('should detect budget_increase and require biometric', () => {
+      const existing = createTestPolicy({ conditions: { ...createTestPolicy().conditions, maxAmountPerDay: 500 } });
+      engine.addPolicy(existing);
+
+      const updated = createTestPolicy({ conditions: { ...createTestPolicy().conditions, maxAmountPerDay: 1000 } });
+      const result = engine.classifyPolicyChange(updated, 'policy-1');
+
+      expect(result.requiresEscalation).toBe(true);
+      expect(result.approvalLevel).toBe('biometric');
+      expect(result.criticalChanges).toContain('budget_increase');
+      expect(result.reasons.some(r => r.includes('maxAmountPerDay'))).toBe(true);
+    });
+
+    it('should detect scope_escalation', () => {
+      const existing = createTestPolicy({ scope: 'auto_payment' });
+      engine.addPolicy(existing);
+
+      const updated = createTestPolicy({ scope: 'full' });
+      const result = engine.classifyPolicyChange(updated, 'policy-1');
+
+      expect(result.requiresEscalation).toBe(true);
+      expect(result.approvalLevel).toBe('biometric');
+      expect(result.criticalChanges).toContain('scope_escalation');
+    });
+
+    it('should detect allowlist_address_remove_all', () => {
+      const existing = createTestPolicy({
+        conditions: { ...createTestPolicy().conditions, allowListAddresses: ['0xA', '0xB'] },
+      });
+      engine.addPolicy(existing);
+
+      const updated = createTestPolicy({
+        conditions: { ...createTestPolicy().conditions, allowListAddresses: [] },
+      });
+      const result = engine.classifyPolicyChange(updated, 'policy-1');
+
+      expect(result.requiresEscalation).toBe(true);
+      expect(result.approvalLevel).toBe('biometric');
+      expect(result.criticalChanges).toContain('allowlist_address_remove_all');
+    });
+
+    it('should detect allowlist_address_add with review level', () => {
+      const existing = createTestPolicy({
+        conditions: { ...createTestPolicy().conditions, allowListAddresses: ['0xA'] },
+      });
+      engine.addPolicy(existing);
+
+      const updated = createTestPolicy({
+        conditions: { ...createTestPolicy().conditions, allowListAddresses: ['0xA', '0xNEW'] },
+      });
+      const result = engine.classifyPolicyChange(updated, 'policy-1');
+
+      expect(result.requiresEscalation).toBe(true);
+      expect(result.approvalLevel).toBe('review');
+      expect(result.criticalChanges).toContain('allowlist_address_add');
+    });
+
+    it('should detect time_window_remove', () => {
+      const existing = createTestPolicy({
+        conditions: { ...createTestPolicy().conditions, timeWindow: { start: '09:00', end: '17:00' } },
+      });
+      engine.addPolicy(existing);
+
+      const updated = createTestPolicy({
+        conditions: { ...createTestPolicy().conditions },
+      });
+      // Ensure no timeWindow on updated
+      delete (updated.conditions as Record<string, unknown>).timeWindow;
+      const result = engine.classifyPolicyChange(updated, 'policy-1');
+
+      expect(result.requiresEscalation).toBe(true);
+      expect(result.criticalChanges).toContain('time_window_remove');
+    });
+
+    it('should detect min_balance_lower', () => {
+      const existing = createTestPolicy({
+        conditions: { ...createTestPolicy().conditions, minBalanceAfter: 100 },
+      });
+      engine.addPolicy(existing);
+
+      const updated = createTestPolicy({
+        conditions: { ...createTestPolicy().conditions, minBalanceAfter: 5 },
+      });
+      const result = engine.classifyPolicyChange(updated, 'policy-1');
+
+      expect(result.requiresEscalation).toBe(true);
+      expect(result.criticalChanges).toContain('min_balance_lower');
+    });
+
+    it('should detect first_pay_review_disable', () => {
+      const existing = createTestPolicy({
+        conditions: { ...createTestPolicy().conditions, requireReviewBeforeFirstPay: true },
+      });
+      engine.addPolicy(existing);
+
+      const updated = createTestPolicy({
+        conditions: { ...createTestPolicy().conditions, requireReviewBeforeFirstPay: false },
+      });
+      const result = engine.classifyPolicyChange(updated, 'policy-1');
+
+      expect(result.requiresEscalation).toBe(true);
+      expect(result.criticalChanges).toContain('first_pay_review_disable');
+    });
+
+    it('should detect expiration_extend', () => {
+      const existing = createTestPolicy({ expiresAt: '2025-06-01T00:00:00.000Z' });
+      engine.addPolicy(existing);
+
+      const updated = createTestPolicy({ expiresAt: '2026-12-01T00:00:00.000Z' });
+      const result = engine.classifyPolicyChange(updated, 'policy-1');
+
+      expect(result.requiresEscalation).toBe(true);
+      expect(result.criticalChanges).toContain('expiration_extend');
+    });
+
+    it('should detect expiration removal', () => {
+      const existing = createTestPolicy({ expiresAt: '2025-06-01T00:00:00.000Z' });
+      engine.addPolicy(existing);
+
+      const updated = createTestPolicy();
+      // No expiresAt on updated
+      const result = engine.classifyPolicyChange(updated, 'policy-1');
+
+      expect(result.requiresEscalation).toBe(true);
+      expect(result.criticalChanges).toContain('expiration_extend');
+    });
+
+    it('should return auto when no critical changes detected', () => {
+      const existing = createTestPolicy();
+      engine.addPolicy(existing);
+
+      // Same policy, no changes
+      const updated = createTestPolicy();
+      const result = engine.classifyPolicyChange(updated, 'policy-1');
+
+      expect(result.requiresEscalation).toBe(false);
+      expect(result.approvalLevel).toBe('auto');
+      expect(result.criticalChanges).toHaveLength(0);
+    });
+
+    it('should escalate to biometric when any biometric-level change exists', () => {
+      const existing = createTestPolicy({
+        conditions: {
+          ...createTestPolicy().conditions,
+          requireReviewBeforeFirstPay: true,
+          minBalanceAfter: 100,
+        },
+      });
+      engine.addPolicy(existing);
+
+      // Lower minBalance (review-level) + increase budget (biometric-level)
+      const updated = createTestPolicy({
+        conditions: {
+          ...createTestPolicy().conditions,
+          requireReviewBeforeFirstPay: false,
+          minBalanceAfter: 5,
+          maxAmountPerDay: 99999,
+        },
+      });
+      const result = engine.classifyPolicyChange(updated, 'policy-1');
+
+      expect(result.requiresEscalation).toBe(true);
+      expect(result.approvalLevel).toBe('biometric');
+      expect(result.criticalChanges.length).toBeGreaterThanOrEqual(2);
+    });
+  });
 });

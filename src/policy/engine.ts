@@ -20,6 +20,9 @@ import type {
   UsageSnapshot,
   IAgentAuditReader,
   BudgetCheckResult,
+  CriticalPolicyChangeType,
+  PolicyApprovalLevel,
+  PolicyChangeClassification,
 } from '../types/policy.js';
 import { BudgetTracker } from './budget.js';
 import { verifyXidentitySignature } from '../crypto/signing.js';
@@ -30,6 +33,28 @@ const POLICIES_STORAGE_KEY = 'aesp:policies';
 const AUDIT_STORAGE_KEY = 'aesp:audit';
 const MAX_AUDIT_LOG_SIZE = 10000;
 const MAX_SAFE_AMOUNT = Number.MAX_SAFE_INTEGER;
+
+/**
+ * Scope broadness ranking — higher number = broader permissions.
+ * Used by classifyPolicyChange to detect scope escalation.
+ */
+const SCOPE_RANK: Record<string, number> = {
+  auto_payment: 1,
+  negotiation: 2,
+  commitment: 3,
+  delegated_negotiation: 3,
+  full: 10,
+};
+
+/**
+ * Changes that require biometric-level approval (highest tier).
+ * All others that require escalation default to 'review'.
+ */
+const BIOMETRIC_CHANGES: Set<CriticalPolicyChangeType> = new Set([
+  'budget_increase',
+  'scope_escalation',
+  'allowlist_address_remove_all',
+]);
 
 /** Deterministic policy payload for signing/verification (canonical key order). */
 function stringifyPolicyForVerification(policy: AgentPolicy): string {
@@ -250,6 +275,135 @@ export class PolicyEngine implements IAgentPolicyEngine, IAgentAuditReader {
    */
   getBudgetTracker(): BudgetTracker {
     return this.budgetTracker;
+  }
+
+  // ─── Policy Change Classification ──────────────────────────────────────
+
+  /**
+   * Classify a proposed policy change against the existing policy.
+   *
+   * When updating a policy, call this method first to determine whether the
+   * change requires escalated approval (e.g., user review or mobile biometric).
+   *
+   * If `existingPolicyId` is provided, the new policy is compared against it.
+   * If the existing policy is not found (i.e., this is a brand-new policy),
+   * the change is classified as non-critical (auto).
+   *
+   * @returns A classification with the required approval level and reasons.
+   */
+  classifyPolicyChange(
+    newPolicy: AgentPolicy,
+    existingPolicyId?: string,
+  ): PolicyChangeClassification {
+    const existing = existingPolicyId ? this.getPolicyById(existingPolicyId) : undefined;
+
+    // Brand new policy — no existing reference to compare against
+    if (!existing) {
+      return {
+        requiresEscalation: false,
+        approvalLevel: 'auto',
+        criticalChanges: [],
+        reasons: [],
+      };
+    }
+
+    const changes: CriticalPolicyChangeType[] = [];
+    const reasons: string[] = [];
+    const oldC = existing.conditions;
+    const newC = newPolicy.conditions;
+
+    // 1. Budget increases
+    if (newC.maxAmountPerTx > oldC.maxAmountPerTx) {
+      changes.push('budget_increase');
+      reasons.push(`maxAmountPerTx: ${oldC.maxAmountPerTx} → ${newC.maxAmountPerTx}`);
+    }
+    if (newC.maxAmountPerDay > oldC.maxAmountPerDay) {
+      changes.push('budget_increase');
+      reasons.push(`maxAmountPerDay: ${oldC.maxAmountPerDay} → ${newC.maxAmountPerDay}`);
+    }
+    if (newC.maxAmountPerWeek > oldC.maxAmountPerWeek) {
+      changes.push('budget_increase');
+      reasons.push(`maxAmountPerWeek: ${oldC.maxAmountPerWeek} → ${newC.maxAmountPerWeek}`);
+    }
+    if (newC.maxAmountPerMonth > oldC.maxAmountPerMonth) {
+      changes.push('budget_increase');
+      reasons.push(`maxAmountPerMonth: ${oldC.maxAmountPerMonth} → ${newC.maxAmountPerMonth}`);
+    }
+
+    // 2. Allowlist changes
+    const oldAddrs = new Set(oldC.allowListAddresses ?? []);
+    const newAddrs = newC.allowListAddresses ?? [];
+    if (oldAddrs.size > 0 && newAddrs.length === 0) {
+      changes.push('allowlist_address_remove_all');
+      reasons.push('Address allowlist cleared (was restricted, now open to all)');
+    } else {
+      for (const addr of newAddrs) {
+        if (!oldAddrs.has(addr)) {
+          changes.push('allowlist_address_add');
+          reasons.push(`New address added to allowlist: ${addr}`);
+        }
+      }
+    }
+
+    // 3. Scope escalation
+    const oldRank = SCOPE_RANK[existing.scope] ?? 0;
+    const newRank = SCOPE_RANK[newPolicy.scope] ?? 0;
+    if (newRank > oldRank) {
+      changes.push('scope_escalation');
+      reasons.push(`Scope broadened: ${existing.scope} → ${newPolicy.scope}`);
+    }
+
+    // 4. Time window removal
+    if (oldC.timeWindow && !newC.timeWindow) {
+      changes.push('time_window_remove');
+      reasons.push(`Time window restriction removed (was ${oldC.timeWindow.start}-${oldC.timeWindow.end})`);
+    }
+
+    // 5. Min balance lowered
+    if (newC.minBalanceAfter < oldC.minBalanceAfter) {
+      changes.push('min_balance_lower');
+      reasons.push(`minBalanceAfter lowered: ${oldC.minBalanceAfter} → ${newC.minBalanceAfter}`);
+    }
+
+    // 6. First pay review disabled
+    if (oldC.requireReviewBeforeFirstPay && !newC.requireReviewBeforeFirstPay) {
+      changes.push('first_pay_review_disable');
+      reasons.push('First-payment human review disabled');
+    }
+
+    // 7. Expiration extended or removed
+    if (existing.expiresAt) {
+      if (!newPolicy.expiresAt) {
+        changes.push('expiration_extend');
+        reasons.push(`Expiration removed (was ${existing.expiresAt})`);
+      } else if (new Date(newPolicy.expiresAt) > new Date(existing.expiresAt)) {
+        changes.push('expiration_extend');
+        reasons.push(`Expiration extended: ${existing.expiresAt} → ${newPolicy.expiresAt}`);
+      }
+    }
+
+    // Deduplicate changes
+    const uniqueChanges = [...new Set(changes)];
+
+    if (uniqueChanges.length === 0) {
+      return {
+        requiresEscalation: false,
+        approvalLevel: 'auto',
+        criticalChanges: [],
+        reasons: [],
+      };
+    }
+
+    // Determine approval level: biometric if any change is in BIOMETRIC_CHANGES
+    const needsBiometric = uniqueChanges.some((c) => BIOMETRIC_CHANGES.has(c));
+    const approvalLevel: PolicyApprovalLevel = needsBiometric ? 'biometric' : 'review';
+
+    return {
+      requiresEscalation: true,
+      approvalLevel,
+      criticalChanges: uniqueChanges,
+      reasons,
+    };
   }
 
   // ─── Persistence ─────────────────────────────────────────────────────────

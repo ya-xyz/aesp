@@ -16,6 +16,48 @@ export type AuditStorage = 'memory' | 'local' | 'arweave';
 
 // ─── Privacy Policy ─────────────────────────────────────────────────────────
 
+/**
+ * Audit batching strategy for context tag archiving.
+ *
+ * Controls how context tags are aggregated before uploading to Arweave,
+ * enabling cost amortization for high-frequency, low-value transactions.
+ *
+ * - `immediate`: Archive each tag individually as soon as tx is confirmed.
+ * - `time_window`: Accumulate tags and archive in bulk after a time window.
+ * - `count_threshold`: Archive once the number of unarchived tags reaches a count.
+ */
+export type AuditBatchingStrategy = 'immediate' | 'time_window' | 'count_threshold';
+
+/**
+ * Configuration for audit batching when strategy is not 'immediate'.
+ */
+export interface AuditBatchingConfig {
+  /** Batching strategy. Default: 'immediate'. */
+  strategy: AuditBatchingStrategy;
+
+  /**
+   * Time window in milliseconds for 'time_window' strategy.
+   * Tags are accumulated for this duration before a batch archive.
+   * Default: 300_000 (5 minutes).
+   */
+  windowMs?: number;
+
+  /**
+   * Tag count threshold for 'count_threshold' strategy.
+   * A batch archive is triggered when unarchived tag count reaches this value.
+   * Default: 50.
+   */
+  countThreshold?: number;
+
+  /**
+   * Minimum transaction amount (as string, e.g. "1.00") below which tags are
+   * automatically batched regardless of strategy. Tags for transactions below
+   * this amount are never archived individually — they wait for the next batch.
+   * Default: "0" (all tags follow the main strategy).
+   */
+  lowValueThreshold?: string;
+}
+
 export interface PrivacyPolicy {
   /** Privacy level: transparent (direct), basic (per-agent), isolated (per-tx) */
   level: PrivacyLevel;
@@ -27,6 +69,8 @@ export interface PrivacyPolicy {
   consolidationThreshold: number;
   /** Number of ephemeral addresses to pre-derive for the pool */
   preDerivationPoolSize: number;
+  /** Audit batching configuration for cost optimization. Default: immediate. */
+  auditBatching?: AuditBatchingConfig;
 }
 
 // ─── Context Tag Record ─────────────────────────────────────────────────────

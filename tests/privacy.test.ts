@@ -10,7 +10,7 @@ import { AddressPoolManager } from '../src/privacy/address-pool.js';
 import { ContextTagManager } from '../src/privacy/context-tag.js';
 import { ConsolidationScheduler } from '../src/privacy/consolidation.js';
 import { resetWasm } from '../src/crypto/wasm-bridge.js';
-import type { PrivacyPolicy } from '../src/types/privacy.js';
+import type { PrivacyPolicy, AuditBatchingConfig } from '../src/types/privacy.js';
 
 // ─── Setup ──────────────────────────────────────────────────────────────────
 
@@ -875,6 +875,333 @@ describe('ConsolidationScheduler', () => {
 
       const history = scheduler2.getConsolidationHistory('agent1');
       expect(history).toHaveLength(1);
+    });
+  });
+
+  describe('applyJitter', () => {
+    it('should return value within jitter range', () => {
+      const base = 10000;
+      const jitter = 0.3;
+      for (let i = 0; i < 20; i++) {
+        const result = ConsolidationScheduler.applyJitter(base, jitter);
+        expect(result).toBeGreaterThanOrEqual(base * 0.7);
+        expect(result).toBeLessThanOrEqual(base * 1.3);
+      }
+    });
+
+    it('should clamp jitter ratio to [0, 1]', () => {
+      const base = 10000;
+      // Negative jitter treated as 0
+      const noJitter = ConsolidationScheduler.applyJitter(base, -0.5);
+      expect(noJitter).toBe(base);
+      // Jitter > 1 treated as 1
+      for (let i = 0; i < 10; i++) {
+        const maxJitter = ConsolidationScheduler.applyJitter(base, 2.0);
+        expect(maxJitter).toBeGreaterThanOrEqual(0);
+        expect(maxJitter).toBeLessThanOrEqual(base * 2);
+      }
+    });
+  });
+
+  describe('shuffleArray', () => {
+    it('should preserve all elements', () => {
+      const arr = [1, 2, 3, 4, 5, 6, 7, 8];
+      const copy = [...arr];
+      ConsolidationScheduler.shuffleArray(copy);
+      expect(copy.sort()).toEqual(arr.sort());
+    });
+
+    it('should handle empty and single-element arrays', () => {
+      const empty: number[] = [];
+      ConsolidationScheduler.shuffleArray(empty);
+      expect(empty).toEqual([]);
+
+      const single = [42];
+      ConsolidationScheduler.shuffleArray(single);
+      expect(single).toEqual([42]);
+    });
+  });
+
+  describe('consolidateBatched', () => {
+    it('should split addresses into batches', async () => {
+      const consolidateCalls: string[][] = [];
+      scheduler.setHandler({
+        async consolidate(params) {
+          consolidateCalls.push(params.fromAddresses);
+          return `0xtx_batch_${consolidateCalls.length}`;
+        },
+      });
+
+      // Create 7 funded addresses
+      for (let i = 0; i < 7; i++) {
+        const addr = addressPool.deriveEphemeralAddress({
+          mnemonic: 'test',
+          passphrase: 'pass',
+          agentId: 'agent1',
+          chain: 'ethereum',
+          direction: 'inbound',
+        });
+        addressPool.updateAddressStatus('agent1', 'ethereum', addr.address, 'funded');
+      }
+
+      // Consolidate with maxBatchSize=3, no inter-batch delay
+      const records = await scheduler.consolidateBatched({
+        agentId: 'agent1',
+        chain: 'ethereum',
+        vaultAddress: '0xvault',
+        token: 'native',
+        maxBatchSize: 3,
+        interBatchRange: [0, 0], // no delay for testing
+      });
+
+      // 7 addresses / 3 per batch = 3 batches (3 + 3 + 1)
+      expect(records).toHaveLength(3);
+      expect(consolidateCalls).toHaveLength(3);
+
+      // Total addresses across all batches should be 7
+      const totalAddrs = consolidateCalls.reduce((sum, addrs) => sum + addrs.length, 0);
+      expect(totalAddrs).toBe(7);
+
+      // Each batch should be <= 3
+      for (const batch of consolidateCalls) {
+        expect(batch.length).toBeLessThanOrEqual(3);
+      }
+    });
+
+    it('should return empty array when no funded addresses', async () => {
+      scheduler.setHandler({ async consolidate() { return '0xtx'; } });
+
+      const records = await scheduler.consolidateBatched({
+        agentId: 'agent1',
+        chain: 'ethereum',
+        vaultAddress: '0xvault',
+        token: 'native',
+      });
+
+      expect(records).toHaveLength(0);
+    });
+  });
+});
+
+// ─── ContextTagManager — Audit Batching ─────────────────────────────────────
+
+describe('ContextTagManager — Audit Batching', () => {
+  let tagManager: ContextTagManager;
+
+  beforeEach(() => {
+    tagManager = new ContextTagManager(storage);
+  });
+
+  afterEach(() => {
+    tagManager.dispose();
+  });
+
+  describe('shouldDeferArchiving', () => {
+    it('should not defer when no batching config is set', () => {
+      const tag = tagManager.createTag({
+        agentId: 'agent1',
+        contextInfo: 'ctx:test',
+        derivedAddress: '0xabc',
+        chain: 'ethereum',
+        direction: 'outbound',
+        amount: '0.05',
+        token: 'native',
+        counterpartyAddress: '0xdef',
+        privacyLevel: 'isolated',
+      });
+
+      expect(tagManager.shouldDeferArchiving(tag)).toBe(false);
+    });
+
+    it('should defer low-value transactions when lowValueThreshold is set', () => {
+      const config: AuditBatchingConfig = {
+        strategy: 'time_window',
+        windowMs: 300000,
+        lowValueThreshold: '1.00',
+      };
+      tagManager.startBatchArchiving('bW9ja194aWRlbnRpdHk=', config);
+
+      const lowValue = tagManager.createTag({
+        agentId: 'agent1',
+        contextInfo: 'ctx:low',
+        derivedAddress: '0xlow',
+        chain: 'ethereum',
+        direction: 'outbound',
+        amount: '0.05',
+        token: 'native',
+        counterpartyAddress: '0xdef',
+        privacyLevel: 'isolated',
+      });
+
+      const highValue = tagManager.createTag({
+        agentId: 'agent1',
+        contextInfo: 'ctx:high',
+        derivedAddress: '0xhigh',
+        chain: 'ethereum',
+        direction: 'outbound',
+        amount: '50.00',
+        token: 'native',
+        counterpartyAddress: '0xdef',
+        privacyLevel: 'isolated',
+      });
+
+      expect(tagManager.shouldDeferArchiving(lowValue)).toBe(true);
+      // In time_window strategy, all tags are deferred
+      expect(tagManager.shouldDeferArchiving(highValue)).toBe(true);
+
+      tagManager.stopBatchArchiving();
+    });
+
+    it('should not defer with immediate strategy', () => {
+      const config: AuditBatchingConfig = {
+        strategy: 'immediate',
+      };
+      tagManager.startBatchArchiving('bW9ja194aWRlbnRpdHk=', config);
+
+      const tag = tagManager.createTag({
+        agentId: 'agent1',
+        contextInfo: 'ctx:imm',
+        derivedAddress: '0ximm',
+        chain: 'ethereum',
+        direction: 'outbound',
+        amount: '0.05',
+        token: 'native',
+        counterpartyAddress: '0xdef',
+        privacyLevel: 'isolated',
+      });
+
+      expect(tagManager.shouldDeferArchiving(tag)).toBe(false);
+      tagManager.stopBatchArchiving();
+    });
+  });
+
+  describe('getUnarchivedConfirmedCount', () => {
+    it('should count only confirmed, unarchived tags', () => {
+      // Tag without txHash (not confirmed) — should not count
+      tagManager.createTag({
+        agentId: 'agent1',
+        contextInfo: 'ctx:1',
+        derivedAddress: '0xa1',
+        chain: 'ethereum',
+        direction: 'outbound',
+        amount: '100',
+        token: 'native',
+        counterpartyAddress: '0xdef',
+        privacyLevel: 'isolated',
+      });
+
+      // Tag with txHash (confirmed) — should count
+      const t2 = tagManager.createTag({
+        agentId: 'agent1',
+        contextInfo: 'ctx:2',
+        derivedAddress: '0xa2',
+        chain: 'ethereum',
+        direction: 'outbound',
+        amount: '200',
+        token: 'native',
+        counterpartyAddress: '0xdef',
+        txHash: '0xtx2',
+        privacyLevel: 'isolated',
+      });
+
+      // Tag with txHash but already archived — should not count
+      tagManager.createTag({
+        agentId: 'agent1',
+        contextInfo: 'ctx:3',
+        derivedAddress: '0xa3',
+        chain: 'ethereum',
+        direction: 'outbound',
+        amount: '300',
+        token: 'native',
+        counterpartyAddress: '0xdef',
+        txHash: '0xtx3',
+        privacyLevel: 'isolated',
+      });
+      // Manually archive the third tag
+      const t3 = tagManager.getTagsByAgent('agent1').find(t => t.contextInfo === 'ctx:3');
+      if (t3) {
+        t3.archivedAt = Date.now();
+        t3.arweaveTxId = 'ar_mock';
+      }
+
+      expect(tagManager.getUnarchivedConfirmedCount()).toBe(1);
+    });
+  });
+
+  describe('startBatchArchiving / stopBatchArchiving', () => {
+    it('should accept time_window config and clean up on stop', () => {
+      const config: AuditBatchingConfig = {
+        strategy: 'time_window',
+        windowMs: 60000,
+      };
+
+      tagManager.startBatchArchiving('bW9ja194aWRlbnRpdHk=', config);
+      // Should not throw
+      tagManager.stopBatchArchiving();
+    });
+
+    it('should accept count_threshold config', () => {
+      const config: AuditBatchingConfig = {
+        strategy: 'count_threshold',
+        countThreshold: 10,
+      };
+
+      tagManager.startBatchArchiving('bW9ja194aWRlbnRpdHk=', config);
+      // Should not throw
+      tagManager.stopBatchArchiving();
+    });
+
+    it('should clean up batch timer on dispose', () => {
+      const config: AuditBatchingConfig = {
+        strategy: 'time_window',
+        windowMs: 60000,
+      };
+
+      tagManager.startBatchArchiving('bW9ja194aWRlbnRpdHk=', config);
+      // dispose should clean up both save timer and batch timer
+      tagManager.dispose();
+    });
+  });
+
+  describe('count_threshold auto-trigger', () => {
+    it('should trigger batchArchive when threshold reached', async () => {
+      let uploadCount = 0;
+      tagManager.setArweaveUploader({
+        async upload(_data: Uint8Array, _ct: string): Promise<string> {
+          uploadCount++;
+          return `ar_tx_${uploadCount}`;
+        },
+      });
+
+      const config: AuditBatchingConfig = {
+        strategy: 'count_threshold',
+        countThreshold: 3,
+      };
+      tagManager.startBatchArchiving('bW9ja194aWRlbnRpdHk=', config);
+
+      // Create 3 tags with txHash (confirmed) to trigger threshold
+      for (let i = 0; i < 3; i++) {
+        tagManager.createTag({
+          agentId: 'agent1',
+          contextInfo: `ctx:auto:${i}`,
+          derivedAddress: `0xauto${i}`,
+          chain: 'ethereum',
+          direction: 'outbound',
+          amount: '10',
+          token: 'native',
+          counterpartyAddress: '0xdef',
+          txHash: `0xtx_auto_${i}`,
+          privacyLevel: 'isolated',
+        });
+      }
+
+      // Allow the async batchArchive to complete
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // All 3 tags should have been archived
+      expect(uploadCount).toBe(3);
+
+      tagManager.stopBatchArchiving();
     });
   });
 });

@@ -7,6 +7,9 @@
  *
  * Storage pipeline:
  *   ContextTagRecord → ECIES encrypt → Arweave upload → cNFT mint
+ *
+ * Supports configurable audit batching strategies to amortize Arweave
+ * upload costs for high-frequency, low-value agent transactions.
  */
 
 import type { StorageAdapter, ChainId, TokenId } from '../types/index.js';
@@ -14,6 +17,7 @@ import type {
   ContextTagRecord,
   PrivacyLevel,
   AuditStorage,
+  AuditBatchingConfig,
 } from '../types/privacy.js';
 import { generateUUID } from '../crypto/hashing.js';
 import { encryptForXidentity } from '../crypto/encryption.js';
@@ -22,6 +26,8 @@ import { encryptForXidentity } from '../crypto/encryption.js';
 
 const TAGS_STORAGE_KEY = 'aesp:context_tags';
 const MAX_LOCAL_TAGS = 10000;
+const DEFAULT_BATCH_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
+const DEFAULT_BATCH_COUNT_THRESHOLD = 50;
 
 // ─── Arweave Upload Interface ───────────────────────────────────────────────
 
@@ -41,6 +47,12 @@ export class ContextTagManager {
   private tags: Map<string, ContextTagRecord> = new Map();
   private arweaveUploader?: ArweaveUploader;
   private nftMinter?: AuditNFTMinter;
+
+  // ─── Batch Archiving State ──────────────────────────────────────────
+  private batchTimer: ReturnType<typeof setTimeout> | null = null;
+  private batchingConfig: AuditBatchingConfig | null = null;
+  private batchOwnerXidentity: string | null = null;
+
   constructor(private readonly storage: StorageAdapter) {}
 
   /**
@@ -104,6 +116,17 @@ export class ContextTagManager {
     }
 
     this.scheduleSave();
+
+    // Check count_threshold trigger
+    if (this.batchingConfig?.strategy === 'count_threshold') {
+      const threshold = this.batchingConfig.countThreshold ?? DEFAULT_BATCH_COUNT_THRESHOLD;
+      const unarchived = this.getUnarchivedConfirmedCount();
+      if (unarchived >= threshold && this.batchOwnerXidentity) {
+        // Trigger immediate batch archive
+        this.batchArchive(this.batchOwnerXidentity, 'arweave').catch(() => { /* silent */ });
+      }
+    }
+
     return tag;
   }
 
@@ -115,6 +138,15 @@ export class ContextTagManager {
     if (tag) {
       tag.txHash = txHash;
       this.scheduleSave();
+
+      // Check count_threshold trigger after tx confirmation
+      if (this.batchingConfig?.strategy === 'count_threshold') {
+        const threshold = this.batchingConfig.countThreshold ?? DEFAULT_BATCH_COUNT_THRESHOLD;
+        const unarchived = this.getUnarchivedConfirmedCount();
+        if (unarchived >= threshold && this.batchOwnerXidentity) {
+          this.batchArchive(this.batchOwnerXidentity, 'arweave').catch(() => { /* silent */ });
+        }
+      }
     }
   }
 
@@ -210,6 +242,88 @@ export class ContextTagManager {
     return archived;
   }
 
+  // ─── Scheduled Batch Archiving ──────────────────────────────────────
+
+  /**
+   * Start scheduled batch archiving with the given batching configuration.
+   *
+   * For `time_window` strategy: sets up a recurring timer that triggers
+   * `batchArchive` every `windowMs` milliseconds.
+   *
+   * For `count_threshold` strategy: batch archive is triggered automatically
+   * when the number of unarchived confirmed tags reaches `countThreshold`.
+   *
+   * For `immediate` strategy: no scheduling needed (tags are archived on creation).
+   *
+   * @param ownerXidentityB64 Owner's xidentity for encryption.
+   * @param config Batching configuration.
+   */
+  startBatchArchiving(
+    ownerXidentityB64: string,
+    config: AuditBatchingConfig,
+  ): void {
+    this.stopBatchArchiving();
+    this.batchingConfig = config;
+    this.batchOwnerXidentity = ownerXidentityB64;
+
+    if (config.strategy === 'time_window') {
+      const windowMs = config.windowMs ?? DEFAULT_BATCH_WINDOW_MS;
+      this.scheduleBatchTimer(windowMs);
+    }
+    // count_threshold is handled reactively in createTag / updateTagTxHash
+    // immediate does not need scheduling
+  }
+
+  /**
+   * Stop scheduled batch archiving and cancel any pending batch timer.
+   */
+  stopBatchArchiving(): void {
+    if (this.batchTimer !== null) {
+      clearTimeout(this.batchTimer);
+      this.batchTimer = null;
+    }
+    this.batchingConfig = null;
+    this.batchOwnerXidentity = null;
+  }
+
+  /**
+   * Get the number of unarchived tags with confirmed transactions.
+   */
+  getUnarchivedConfirmedCount(): number {
+    let count = 0;
+    for (const tag of this.tags.values()) {
+      if (tag.txHash && !tag.archivedAt) count++;
+    }
+    return count;
+  }
+
+  /**
+   * Check whether a tag should be archived immediately or batched.
+   *
+   * Returns `true` if the tag should wait for a batch (i.e., do NOT archive now).
+   * Returns `false` if the tag should be archived immediately.
+   */
+  shouldDeferArchiving(tag: ContextTagRecord): boolean {
+    if (!this.batchingConfig) return false; // no batching config → archive immediately
+
+    const { strategy, lowValueThreshold } = this.batchingConfig;
+
+    // Immediate strategy never defers
+    if (strategy === 'immediate') return false;
+
+    // Low-value transactions are always deferred to batch
+    if (lowValueThreshold) {
+      const threshold = Number(lowValueThreshold);
+      const amount = Number(tag.amount);
+      if (Number.isFinite(threshold) && Number.isFinite(amount) && amount < threshold) {
+        return true;
+      }
+    }
+
+    // time_window and count_threshold strategies defer by default
+    return strategy === 'time_window' || strategy === 'count_threshold';
+  }
+
   // ─── Query ─────────────────────────────────────────────────────────────
 
   getTag(tagId: string): ContextTagRecord | undefined {
@@ -254,12 +368,16 @@ export class ContextTagManager {
   }
 
   /**
-   * Cancel any pending save timer (for cleanup / shutdown).
+   * Cancel any pending save timer and batch timer (for cleanup / shutdown).
    */
   dispose(): void {
     if (this.saveTimer !== null) {
       clearTimeout(this.saveTimer);
       this.saveTimer = null;
+    }
+    if (this.batchTimer !== null) {
+      clearTimeout(this.batchTimer);
+      this.batchTimer = null;
     }
   }
 
@@ -271,5 +389,21 @@ export class ContextTagManager {
       this.saveTimer = null;
       this.save().catch(() => { /* silent */ });
     }, 100);
+  }
+
+  private scheduleBatchTimer(windowMs: number): void {
+    this.batchTimer = setTimeout(async () => {
+      if (this.batchOwnerXidentity) {
+        try {
+          await this.batchArchive(this.batchOwnerXidentity, 'arweave');
+        } catch {
+          // Keep timer alive even if one run fails
+        }
+      }
+      // Re-schedule if still active
+      if (this.batchingConfig?.strategy === 'time_window') {
+        this.scheduleBatchTimer(windowMs);
+      }
+    }, windowMs);
   }
 }
