@@ -1,0 +1,88 @@
+{
+  "name": "@yallet/aesp",
+  "version": "0.1.0",
+  "description": "Agent Economic Sovereignty Protocol — defining how AI agents operate economically under human sovereignty",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./types": {
+      "import": "./dist/types/index.js",
+      "types": "./dist/types/index.d.ts"
+    },
+    "./crypto": {
+      "import": "./dist/crypto/index.js",
+      "types": "./dist/crypto/index.d.ts"
+    },
+    "./identity": {
+      "import": "./dist/identity/index.js",
+      "types": "./dist/identity/index.d.ts"
+    },
+    "./policy": {
+      "import": "./dist/policy/index.js",
+      "types": "./dist/policy/index.d.ts"
+    },
+    "./negotiation": {
+      "import": "./dist/negotiation/index.js",
+      "types": "./dist/negotiation/index.d.ts"
+    },
+    "./commitment": {
+      "import": "./dist/commitment/index.js",
+      "types": "./dist/commitment/index.d.ts"
+    },
+    "./review": {
+      "import": "./dist/review/index.js",
+      "types": "./dist/review/index.d.ts"
+    },
+    "./mcp": {
+      "import": "./dist/mcp/index.js",
+      "types": "./dist/mcp/index.d.ts"
+    },
+    "./a2a": {
+      "import": "./dist/a2a/index.js",
+      "types": "./dist/a2a/index.d.ts"
+    },
+    "./privacy": {
+      "import": "./dist/privacy/index.js",
+      "types": "./dist/privacy/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build:wasm": "/Users/jwang/dev.y/dev.acegf-wallet/scripts/build-wasm.sh release && cp /Users/jwang/dev.y/dev.acegf-wallet/pkg/{acegf.js,acegf.d.ts,acegf_bg.wasm,acegf_bg.wasm.d.ts} wasm/",
+    "build:ts": "tsc",
+    "build": "npm run build:wasm && npm run build:ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint src/",
+    "clean": "rm -rf dist/",
+    "prepublishOnly": "npm run clean && npm run build"
+  },
+  "keywords": [
+    "aesp",
+    "agent",
+    "economic",
+    "sovereignty",
+    "protocol",
+    "yallet",
+    "yault",
+    "mcp",
+    "a2a",
+    "ap2",
+    "privacy",
+    "context-isolation",
+    "ephemeral-address"
+  ],
+  "author": "Yallet",
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18",
+    "eslint": "^9.18.0",
+    "prettier": "^3.4.2"
+  }
+}

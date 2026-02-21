@@ -1,0 +1,10 @@
+node_modules/
+dist/
+wasm/*.wasm
+wasm/*.js
+wasm/*.d.ts
+coverage/
+*.tsbuildinfo
+.DS_Store
+.idea/
+.claude/
