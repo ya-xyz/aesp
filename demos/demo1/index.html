@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AESP Demo — Three-Party Grocery Delivery</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <header>
+    <h1>AESP <span class="subtitle">Agent Economic Sovereignty Protocol</span></h1>
+    <p class="tagline">Three-Party Grocery Delivery Demo</p>
+    <div class="controls">
+      <button id="btn-run-all" class="btn btn-primary">&#9654; Run Demo</button>
+      <button id="btn-reset" class="btn btn-secondary">Reset</button>
+    </div>
+  </header>
+
+  <main id="main">
+    <!-- SVG overlay for connection lines -->
+    <svg id="svg-overlay" class="svg-overlay">
+      <defs>
+        <marker id="arrow-blue" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#58a6ff" />
+        </marker>
+        <marker id="arrow-green" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#3fb950" />
+        </marker>
+        <marker id="arrow-purple" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#bc8cff" />
+        </marker>
+        <marker id="arrow-amber" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#d29922" />
+        </marker>
+      </defs>
+    </svg>
+
+    <!-- Three Agent Panels -->
+    <div class="panels">
+      <div class="panel panel-user" id="panel-user">
+        <div class="panel-header">
+          <span class="panel-icon">&#128100;</span>
+          <div>
+            <h2>User Agent</h2>
+            <span class="panel-label">Shopper</span>
+          </div>
+        </div>
+        <div class="panel-body" id="panel-user-body"></div>
+      </div>
+
+      <div class="panel panel-supermarket" id="panel-supermarket">
+        <div class="panel-header">
+          <span class="panel-icon">&#127978;</span>
+          <div>
+            <h2>Supermarket</h2>
+            <span class="panel-label">FreshMart</span>
+          </div>
+        </div>
+        <div class="panel-body" id="panel-supermarket-body"></div>
+      </div>
+
+      <div class="panel panel-robot" id="panel-robot">
+        <div class="panel-header">
+          <span class="panel-icon">&#129302;</span>
+          <div>
+            <h2>Delivery Robot</h2>
+            <span class="panel-label">Optimus</span>
+          </div>
+        </div>
+        <div class="panel-body" id="panel-robot-body"></div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <p>AESP v0.1.0 &mdash; Agent Economic Sovereignty Protocol &mdash; <a href="https://yault.app" target="_blank">Yault</a></p>
+  </footer>
+
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>

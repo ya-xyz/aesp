@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AESP Demo 3 — Privacy-Preserving NFT Hunter</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <header>
+    <h1>AESP <span class="subtitle">Agent Economic Sovereignty Protocol</span></h1>
+    <p class="tagline">Privacy-Preserving NFT Hunter</p>
+    <div class="controls">
+      <button id="btn-run-all" class="btn btn-primary">&#9654; Run Demo</button>
+      <button id="btn-reset" class="btn btn-secondary">Reset</button>
+    </div>
+  </header>
+
+  <main id="main">
+    <svg id="svg-overlay" class="svg-overlay">
+      <defs>
+        <marker id="arrow-blue" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#58a6ff" />
+        </marker>
+        <marker id="arrow-green" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#3fb950" />
+        </marker>
+        <marker id="arrow-purple" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#bc8cff" />
+        </marker>
+        <marker id="arrow-amber" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#d29922" />
+        </marker>
+        <marker id="arrow-red" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#f85149" />
+        </marker>
+      </defs>
+    </svg>
+
+    <div class="panels">
+      <div class="panel panel-hunter" id="panel-hunter">
+        <div class="panel-header">
+          <span class="panel-icon">&#128270;</span>
+          <div>
+            <h2>NFT Hunter</h2>
+            <span class="panel-label">Autonomous Agent</span>
+          </div>
+        </div>
+        <div class="panel-body" id="panel-hunter-body"></div>
+      </div>
+
+      <div class="panel panel-marketplace" id="panel-marketplace">
+        <div class="panel-header">
+          <span class="panel-icon">&#127912;</span>
+          <div>
+            <h2>NFT Marketplace</h2>
+            <span class="panel-label">PixelVault</span>
+          </div>
+        </div>
+        <div class="panel-body" id="panel-marketplace-body"></div>
+      </div>
+
+      <div class="panel panel-sniper" id="panel-sniper">
+        <div class="panel-header">
+          <span class="panel-icon">&#127919;</span>
+          <div>
+            <h2>Sniper Bot</h2>
+            <span class="panel-label">Sub-Agent</span>
+          </div>
+        </div>
+        <div class="panel-body" id="panel-sniper-body"></div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <p>AESP v0.1.0 &mdash; Agent Economic Sovereignty Protocol &mdash; <a href="https://yault.app" target="_blank">Yault</a></p>
+  </footer>
+
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>
