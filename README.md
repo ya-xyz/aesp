@@ -248,4 +248,8 @@ Detailed architecture documents are available in the [`docs/`](./docs/) director
 
 ## License
 
-All rights reserved.
+This project is licensed under the **Business Source License 1.1 (BSL-1.1)**. See [LICENSE](./LICENSE) for the full text.
+
+- **Summary:** You may copy, modify, create derivative works, and redistribute the code for **non-production use**. Production use requires a commercial license from the Licensor or compliance with the license terms.
+- **Change Date:** On **2030-01-01**, or the fourth anniversary of the first public distribution of this version (whichever is earlier), this code will become available under **GPL-2.0-or-later**.
+- BSL is not an Open Source license until the Change Date; see [MariaDB BSL 1.1](https://mariadb.com/bsl11/) for details.
