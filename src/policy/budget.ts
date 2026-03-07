@@ -17,6 +17,34 @@ import type {
 
 const BUDGET_STORAGE_KEY = 'aesp:budgets';
 const MAX_TRANSACTIONS_KEPT = 1000;
+const AMOUNT_SCALE = 18n;
+const AMOUNT_PATTERN = /^(?:0|[1-9]\d*)(?:\.(\d+))?$/;
+
+type AmountInput = PolicyConditions['maxAmountPerDay'] | BudgetTransaction['amount'];
+
+function toBigIntAmount(value: AmountInput | undefined | null): bigint {
+  if (value === undefined || value === null) return 0n;
+  if (typeof value === 'number') {
+    if (!Number.isSafeInteger(value) || value < 0) return 0n;
+    return BigInt(value) * (10n ** AMOUNT_SCALE);
+  }
+  const s = String(value).trim();
+  if (!AMOUNT_PATTERN.test(s)) return 0n;
+  const [intPart, fracPart = ''] = s.split('.');
+  if (fracPart.length > Number(AMOUNT_SCALE)) return 0n;
+  const normalized = `${intPart}${fracPart.padEnd(Number(AMOUNT_SCALE), '0')}`;
+  return BigInt(normalized);
+}
+
+function toAmountString(value: bigint): string {
+  if (value <= 0n) return '0';
+  const factor = 10n ** AMOUNT_SCALE;
+  const integer = value / factor;
+  let fraction = (value % factor).toString().padStart(Number(AMOUNT_SCALE), '0');
+  // Trim trailing zeros for compactness.
+  fraction = fraction.replace(/0+$/, '');
+  return fraction ? `${integer}.${fraction}` : integer.toString();
+}
 
 // ─── Budget Tracker ──────────────────────────────────────────────────────────
 
@@ -32,60 +60,68 @@ export class BudgetTracker {
    */
   async checkBudget(
     agentId: string,
-    amount: number,
+    amount: AmountInput,
     conditions: PolicyConditions,
   ): Promise<BudgetCheckResult> {
     const budget = this.getOrCreateBudget(agentId);
     this.resetExpiredPeriods(budget);
 
-    const projectedDaily = budget.dailySpent + amount;
-    const projectedWeekly = budget.weeklySpent + amount;
-    const projectedMonthly = budget.monthlySpent + amount;
+    const amountBI = toBigIntAmount(amount);
+    const maxDaily = toBigIntAmount(conditions.maxAmountPerDay);
+    const maxWeekly = toBigIntAmount(conditions.maxAmountPerWeek);
+    const maxMonthly = toBigIntAmount(conditions.maxAmountPerMonth);
+    const spentDaily = toBigIntAmount(budget.dailySpent);
+    const spentWeekly = toBigIntAmount(budget.weeklySpent);
+    const spentMonthly = toBigIntAmount(budget.monthlySpent);
+
+    const projectedDaily = spentDaily + amountBI;
+    const projectedWeekly = spentWeekly + amountBI;
+    const projectedMonthly = spentMonthly + amountBI;
 
     // Check daily limit
-    if (projectedDaily > conditions.maxAmountPerDay) {
+    if (projectedDaily > maxDaily) {
       return {
         allowed: false,
-        remainingDaily: Math.max(0, conditions.maxAmountPerDay - budget.dailySpent),
-        remainingWeekly: Math.max(0, conditions.maxAmountPerWeek - budget.weeklySpent),
-        remainingMonthly: Math.max(0, conditions.maxAmountPerMonth - budget.monthlySpent),
+        remainingDaily: toAmountString(maxDaily > spentDaily ? maxDaily - spentDaily : 0n),
+        remainingWeekly: toAmountString(maxWeekly > spentWeekly ? maxWeekly - spentWeekly : 0n),
+        remainingMonthly: toAmountString(maxMonthly > spentMonthly ? maxMonthly - spentMonthly : 0n),
         violatedRule: 'maxAmountPerDay',
-        violatedActual: String(projectedDaily),
-        violatedLimit: String(conditions.maxAmountPerDay),
+        violatedActual: toAmountString(projectedDaily),
+        violatedLimit: toAmountString(maxDaily),
       };
     }
 
     // Check weekly limit
-    if (projectedWeekly > conditions.maxAmountPerWeek) {
+    if (projectedWeekly > maxWeekly) {
       return {
         allowed: false,
-        remainingDaily: Math.max(0, conditions.maxAmountPerDay - budget.dailySpent),
-        remainingWeekly: Math.max(0, conditions.maxAmountPerWeek - budget.weeklySpent),
-        remainingMonthly: Math.max(0, conditions.maxAmountPerMonth - budget.monthlySpent),
+        remainingDaily: toAmountString(maxDaily > spentDaily ? maxDaily - spentDaily : 0n),
+        remainingWeekly: toAmountString(maxWeekly > spentWeekly ? maxWeekly - spentWeekly : 0n),
+        remainingMonthly: toAmountString(maxMonthly > spentMonthly ? maxMonthly - spentMonthly : 0n),
         violatedRule: 'maxAmountPerWeek',
-        violatedActual: String(projectedWeekly),
-        violatedLimit: String(conditions.maxAmountPerWeek),
+        violatedActual: toAmountString(projectedWeekly),
+        violatedLimit: toAmountString(maxWeekly),
       };
     }
 
     // Check monthly limit
-    if (projectedMonthly > conditions.maxAmountPerMonth) {
+    if (projectedMonthly > maxMonthly) {
       return {
         allowed: false,
-        remainingDaily: Math.max(0, conditions.maxAmountPerDay - budget.dailySpent),
-        remainingWeekly: Math.max(0, conditions.maxAmountPerWeek - budget.weeklySpent),
-        remainingMonthly: Math.max(0, conditions.maxAmountPerMonth - budget.monthlySpent),
+        remainingDaily: toAmountString(maxDaily > spentDaily ? maxDaily - spentDaily : 0n),
+        remainingWeekly: toAmountString(maxWeekly > spentWeekly ? maxWeekly - spentWeekly : 0n),
+        remainingMonthly: toAmountString(maxMonthly > spentMonthly ? maxMonthly - spentMonthly : 0n),
         violatedRule: 'maxAmountPerMonth',
-        violatedActual: String(projectedMonthly),
-        violatedLimit: String(conditions.maxAmountPerMonth),
+        violatedActual: toAmountString(projectedMonthly),
+        violatedLimit: toAmountString(maxMonthly),
       };
     }
 
     return {
       allowed: true,
-      remainingDaily: conditions.maxAmountPerDay - projectedDaily,
-      remainingWeekly: conditions.maxAmountPerWeek - projectedWeekly,
-      remainingMonthly: conditions.maxAmountPerMonth - projectedMonthly,
+      remainingDaily: toAmountString(maxDaily > projectedDaily ? maxDaily - projectedDaily : 0n),
+      remainingWeekly: toAmountString(maxWeekly > projectedWeekly ? maxWeekly - projectedWeekly : 0n),
+      remainingMonthly: toAmountString(maxMonthly > projectedMonthly ? maxMonthly - projectedMonthly : 0n),
     };
   }
 
@@ -98,11 +134,17 @@ export class BudgetTracker {
     const budget = this.getOrCreateBudget(agentId);
     this.resetExpiredPeriods(budget);
 
-    budget.dailySpent += tx.amount;
-    budget.weeklySpent += tx.amount;
-    budget.monthlySpent += tx.amount;
+    const normalizedAmount = toAmountString(toBigIntAmount(tx.amount));
+    budget.dailySpent = toAmountString(toBigIntAmount(budget.dailySpent) + toBigIntAmount(normalizedAmount));
+    budget.weeklySpent = toAmountString(toBigIntAmount(budget.weeklySpent) + toBigIntAmount(normalizedAmount));
+    budget.monthlySpent = toAmountString(
+      toBigIntAmount(budget.monthlySpent) + toBigIntAmount(normalizedAmount),
+    );
 
-    budget.transactions.push(tx);
+    budget.transactions.push({
+      ...tx,
+      amount: normalizedAmount,
+    });
 
     // Trim old transactions to prevent unbounded growth
     if (budget.transactions.length > MAX_TRANSACTIONS_KEPT) {
@@ -140,9 +182,9 @@ export class BudgetTracker {
     const now = new Date().toISOString();
     this.budgets.set(agentId, {
       agentId,
-      dailySpent: 0,
-      weeklySpent: 0,
-      monthlySpent: 0,
+      dailySpent: '0',
+      weeklySpent: '0',
+      monthlySpent: '0',
       lastResetDaily: now,
       lastResetWeekly: now,
       lastResetMonthly: now,
@@ -178,9 +220,9 @@ export class BudgetTracker {
       const now = new Date().toISOString();
       budget = {
         agentId,
-        dailySpent: 0,
-        weeklySpent: 0,
-        monthlySpent: 0,
+        dailySpent: '0',
+        weeklySpent: '0',
+        monthlySpent: '0',
         lastResetDaily: now,
         lastResetWeekly: now,
         lastResetMonthly: now,
@@ -198,14 +240,14 @@ export class BudgetTracker {
     const todayMidnight = new Date(now);
     todayMidnight.setHours(0, 0, 0, 0);
     if (new Date(budget.lastResetDaily) < todayMidnight) {
-      budget.dailySpent = 0;
+      budget.dailySpent = '0';
       budget.lastResetDaily = now.toISOString();
     }
 
     // Weekly reset: if last reset was more than 7 days ago
     const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
     if (new Date(budget.lastResetWeekly) < weekAgo) {
-      budget.weeklySpent = 0;
+      budget.weeklySpent = '0';
       budget.lastResetWeekly = now.toISOString();
     }
 
@@ -215,7 +257,7 @@ export class BudgetTracker {
       lastResetMonth.getMonth() !== now.getMonth() ||
       lastResetMonth.getFullYear() !== now.getFullYear()
     ) {
-      budget.monthlySpent = 0;
+      budget.monthlySpent = '0';
       budget.lastResetMonthly = now.toISOString();
     }
   }

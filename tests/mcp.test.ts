@@ -70,11 +70,31 @@ describe('MCP Module', () => {
       expect(error).toBeNull();
     });
 
+    it('should accept high-precision amount strings', () => {
+      const error = validateToolArgs('yault_create_allowance', {
+        from_wallet_id: 'w1',
+        to_wallet_id: 'w2',
+        amount: '0.000000000000000001',
+        type: 'recurring',
+      });
+      expect(error).toBeNull();
+    });
+
     it('should reject missing required fields', () => {
       const error = validateToolArgs('yault_check_balance', {
         address: '0x123',
       });
       expect(error).toContain('Missing required parameter: chain');
+    });
+
+    it('should reject overly precise amount values', () => {
+      const error = validateToolArgs('yault_create_allowance', {
+        from_wallet_id: 'w1',
+        to_wallet_id: 'w2',
+        amount: '0.0000000000000000001',
+        type: 'recurring',
+      });
+      expect(error).toContain('Invalid amount');
     });
 
     it('should reject invalid enum values', () => {

@@ -32,7 +32,39 @@ import { verifyXidentitySignature } from '../crypto/signing.js';
 const POLICIES_STORAGE_KEY = 'aesp:policies';
 const AUDIT_STORAGE_KEY = 'aesp:audit';
 const MAX_AUDIT_LOG_SIZE = 10000;
-const MAX_SAFE_AMOUNT = Number.MAX_SAFE_INTEGER;
+const MAX_DECIMAL_PLACES = 18;
+const AMOUNT_PATTERN = /^(?:0|[1-9]\d*)(?:\.(\d+))?$/;
+const AMOUNT_SCALE = 10n ** BigInt(MAX_DECIMAL_PLACES);
+
+function amountToBigInt(value: unknown): bigint {
+  return amountToBigIntNullable(value) ?? 0n;
+}
+
+function amountToBigIntNullable(value: unknown): bigint | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || value < 0 || !Number.isSafeInteger(value)) return null;
+    return BigInt(value) * AMOUNT_SCALE;
+  }
+  const s = String(value).trim();
+  if (!AMOUNT_PATTERN.test(s)) return null;
+  const [integer, fraction = ''] = s.split('.');
+  if (fraction.length > MAX_DECIMAL_PLACES) return null;
+  const normalized = `${integer}${fraction.padEnd(MAX_DECIMAL_PLACES, '0')}`;
+  return BigInt(normalized);
+}
+
+function bigIntToAmount(value: bigint): string {
+  if (value <= 0n) return '0';
+  const integer = value / AMOUNT_SCALE;
+  const fractionRaw = (value % AMOUNT_SCALE).toString().padStart(MAX_DECIMAL_PLACES, '0');
+  const fraction = fractionRaw.replace(/0+$/, '');
+  return fraction ? `${integer}.${fraction}` : integer.toString();
+}
+
+function normalizeAmountToString(value: unknown): string {
+  return bigIntToAmount(amountToBigInt(value));
+}
 
 /**
  * Scope broadness ranking — higher number = broader permissions.
@@ -163,7 +195,13 @@ export class PolicyEngine implements IAgentPolicyEngine, IAgentAuditReader {
   // ─── Auto-Approval Check ────────────────────────────────────────────────
 
   /**
-   * Check if a request can be auto-approved under any policy.
+   * Check if a request can be auto-approved under any active policy.
+   *
+   * Uses **disjunctive (OR) semantics**: the request is approved if *any*
+   * matching policy permits it. Each policy grants a specific capability
+   * (e.g., "pay up to 100 USDC to vendor X"), and an agent with multiple
+   * policies receives the union of their permissions. A consequence is that
+   * the most permissive matching policy determines the outcome.
    *
    * @returns The policy ID that allows auto-approval, or null if none.
    */
@@ -197,6 +235,8 @@ export class PolicyEngine implements IAgentPolicyEngine, IAgentAuditReader {
 
     // Always try to extract amount so getUsageToday has accurate data
     const amount = this.extractAmount(result, request);
+    const amountBI = amountToBigInt(amount);
+    const hasPositiveAmount = amountBI > 0n;
 
     const entry: AuditEntry = {
       requestId,
@@ -205,7 +245,7 @@ export class PolicyEngine implements IAgentPolicyEngine, IAgentAuditReader {
       action: request?.action.type ?? (result.txHash ? 'transfer' : 'sign_personal'),
       result,
       timestamp: Date.now(),
-      ...(amount > 0 ? { amount } : {}),
+      ...(hasPositiveAmount ? { amount: bigIntToAmount(amountBI) } : {}),
     };
 
     this.auditLog.push(entry);
@@ -216,9 +256,9 @@ export class PolicyEngine implements IAgentPolicyEngine, IAgentAuditReader {
     }
 
     // Update budget tracker if it was a transfer
-    if (result.success && result.txHash && amount > 0 && policy) {
+    if (result.success && result.txHash && hasPositiveAmount && policy) {
       await this.budgetTracker.recordSpend(policy.agentId, {
-        amount,
+        amount: bigIntToAmount(amountBI),
         timestamp: new Date().toISOString(),
         txHash: result.txHash,
         chain: 'unknown',
@@ -254,10 +294,10 @@ export class PolicyEngine implements IAgentPolicyEngine, IAgentAuditReader {
       // Use stored amount first; fall back to extracting from result.
       // When amount is missing and not extractable, count 0 for the sum
       // but the entry still contributes to `count`.
-      const amount = entry.amount ?? this.extractAmount(entry.result) ?? 0;
+      const amount = amountToBigInt(entry.amount ?? this.extractAmount(entry.result));
       const token = 'native'; // simplified
-      amountByToken[token] = String(
-        Number(amountByToken[token] ?? '0') + amount,
+      amountByToken[token] = bigIntToAmount(
+        amountToBigInt(amountByToken[token] ?? '0') + amount,
       );
     }
 
@@ -313,21 +353,29 @@ export class PolicyEngine implements IAgentPolicyEngine, IAgentAuditReader {
     const newC = newPolicy.conditions;
 
     // 1. Budget increases
-    if (newC.maxAmountPerTx > oldC.maxAmountPerTx) {
+    if (amountToBigInt(newC.maxAmountPerTx) > amountToBigInt(oldC.maxAmountPerTx)) {
       changes.push('budget_increase');
-      reasons.push(`maxAmountPerTx: ${oldC.maxAmountPerTx} → ${newC.maxAmountPerTx}`);
+      reasons.push(
+        `maxAmountPerTx: ${normalizeAmountToString(oldC.maxAmountPerTx)} → ${normalizeAmountToString(newC.maxAmountPerTx)}`,
+      );
     }
-    if (newC.maxAmountPerDay > oldC.maxAmountPerDay) {
+    if (amountToBigInt(newC.maxAmountPerDay) > amountToBigInt(oldC.maxAmountPerDay)) {
       changes.push('budget_increase');
-      reasons.push(`maxAmountPerDay: ${oldC.maxAmountPerDay} → ${newC.maxAmountPerDay}`);
+      reasons.push(
+        `maxAmountPerDay: ${normalizeAmountToString(oldC.maxAmountPerDay)} → ${normalizeAmountToString(newC.maxAmountPerDay)}`,
+      );
     }
-    if (newC.maxAmountPerWeek > oldC.maxAmountPerWeek) {
+    if (amountToBigInt(newC.maxAmountPerWeek) > amountToBigInt(oldC.maxAmountPerWeek)) {
       changes.push('budget_increase');
-      reasons.push(`maxAmountPerWeek: ${oldC.maxAmountPerWeek} → ${newC.maxAmountPerWeek}`);
+      reasons.push(
+        `maxAmountPerWeek: ${normalizeAmountToString(oldC.maxAmountPerWeek)} → ${normalizeAmountToString(newC.maxAmountPerWeek)}`,
+      );
     }
-    if (newC.maxAmountPerMonth > oldC.maxAmountPerMonth) {
+    if (amountToBigInt(newC.maxAmountPerMonth) > amountToBigInt(oldC.maxAmountPerMonth)) {
       changes.push('budget_increase');
-      reasons.push(`maxAmountPerMonth: ${oldC.maxAmountPerMonth} → ${newC.maxAmountPerMonth}`);
+      reasons.push(
+        `maxAmountPerMonth: ${normalizeAmountToString(oldC.maxAmountPerMonth)} → ${normalizeAmountToString(newC.maxAmountPerMonth)}`,
+      );
     }
 
     // 2. Allowlist changes
@@ -360,9 +408,11 @@ export class PolicyEngine implements IAgentPolicyEngine, IAgentAuditReader {
     }
 
     // 5. Min balance lowered
-    if (newC.minBalanceAfter < oldC.minBalanceAfter) {
+    if (amountToBigInt(newC.minBalanceAfter) < amountToBigInt(oldC.minBalanceAfter)) {
       changes.push('min_balance_lower');
-      reasons.push(`minBalanceAfter lowered: ${oldC.minBalanceAfter} → ${newC.minBalanceAfter}`);
+      reasons.push(
+        `minBalanceAfter lowered: ${normalizeAmountToString(oldC.minBalanceAfter)} → ${normalizeAmountToString(newC.minBalanceAfter)}`,
+      );
     }
 
     // 6. First pay review disabled
@@ -477,26 +527,26 @@ export class PolicyEngine implements IAgentPolicyEngine, IAgentAuditReader {
     request: AgentExecutionRequest,
   ): Promise<BudgetCheckResult> {
     const conditions = policy.conditions;
-    const maxAmountPerTx = this.normalizeNonNegativeNumber(conditions.maxAmountPerTx);
-    const maxAmountPerDay = this.normalizeNonNegativeNumber(conditions.maxAmountPerDay);
-    const maxAmountPerWeek = this.normalizeNonNegativeNumber(conditions.maxAmountPerWeek);
-    const maxAmountPerMonth = this.normalizeNonNegativeNumber(conditions.maxAmountPerMonth);
-    const minBalanceAfter = this.normalizeNonNegativeNumber(conditions.minBalanceAfter);
+    const maxAmountPerTx = amountToBigInt(conditions.maxAmountPerTx);
+    const maxAmountPerDay = amountToBigInt(conditions.maxAmountPerDay);
+    const maxAmountPerWeek = amountToBigInt(conditions.maxAmountPerWeek);
+    const maxAmountPerMonth = amountToBigInt(conditions.maxAmountPerMonth);
+    const minBalanceAfter = amountToBigInt(conditions.minBalanceAfter);
 
     // Extract amount from request
     const amount = this.extractAmountFromRequest(request);
 
     if (
       (request.action.type === 'transfer' || request.action.type === 'send_transaction') &&
-      amount <= 0
+      amount <= 0n
     ) {
       return {
         allowed: false,
-        remainingDaily: 0,
-        remainingWeekly: 0,
-        remainingMonthly: 0,
+        remainingDaily: '0',
+        remainingWeekly: '0',
+        remainingMonthly: '0',
         violatedRule: 'amount',
-        violatedActual: String(amount),
+        violatedActual: bigIntToAmount(amount),
         violatedLimit: '> 0',
       };
     }
@@ -505,12 +555,12 @@ export class PolicyEngine implements IAgentPolicyEngine, IAgentAuditReader {
     if (amount > maxAmountPerTx) {
       return {
         allowed: false,
-        remainingDaily: 0,
-        remainingWeekly: 0,
-        remainingMonthly: 0,
+        remainingDaily: '0',
+        remainingWeekly: '0',
+        remainingMonthly: '0',
         violatedRule: 'maxAmountPerTx',
-        violatedActual: String(amount),
-        violatedLimit: String(maxAmountPerTx),
+        violatedActual: bigIntToAmount(amount),
+        violatedLimit: bigIntToAmount(maxAmountPerTx),
       };
     }
 
@@ -519,9 +569,9 @@ export class PolicyEngine implements IAgentPolicyEngine, IAgentAuditReader {
       if (!this.isWithinTimeWindow(conditions.timeWindow)) {
         return {
           allowed: false,
-          remainingDaily: 0,
-          remainingWeekly: 0,
-          remainingMonthly: 0,
+          remainingDaily: '0',
+          remainingWeekly: '0',
+          remainingMonthly: '0',
           violatedRule: 'timeWindow',
           violatedActual: new Date().toTimeString().slice(0, 5),
           violatedLimit: `${conditions.timeWindow.start}-${conditions.timeWindow.end}`,
@@ -536,9 +586,9 @@ export class PolicyEngine implements IAgentPolicyEngine, IAgentAuditReader {
       if (toAddress && !allowListAddresses.includes(toAddress)) {
         return {
           allowed: false,
-          remainingDaily: 0,
-          remainingWeekly: 0,
-          remainingMonthly: 0,
+          remainingDaily: '0',
+          remainingWeekly: '0',
+          remainingMonthly: '0',
           violatedRule: 'allowListAddresses',
           violatedActual: toAddress,
           violatedLimit: 'not in allowlist',
@@ -553,9 +603,9 @@ export class PolicyEngine implements IAgentPolicyEngine, IAgentAuditReader {
       if (chain && !allowListChains.includes(chain)) {
         return {
           allowed: false,
-          remainingDaily: 0,
-          remainingWeekly: 0,
-          remainingMonthly: 0,
+          remainingDaily: '0',
+          remainingWeekly: '0',
+          remainingMonthly: '0',
           violatedRule: 'allowListChains',
           violatedActual: chain,
           violatedLimit: 'not in allowlist',
@@ -570,9 +620,9 @@ export class PolicyEngine implements IAgentPolicyEngine, IAgentAuditReader {
       if (!method || !allowListMethods.includes(method)) {
         return {
           allowed: false,
-          remainingDaily: 0,
-          remainingWeekly: 0,
-          remainingMonthly: 0,
+          remainingDaily: '0',
+          remainingWeekly: '0',
+          remainingMonthly: '0',
           violatedRule: 'allowListMethods',
           violatedActual: method ?? 'unknown',
           violatedLimit: 'not in allowlist',
@@ -588,9 +638,9 @@ export class PolicyEngine implements IAgentPolicyEngine, IAgentAuditReader {
     ) {
       return {
         allowed: false,
-        remainingDaily: 0,
-        remainingWeekly: 0,
-        remainingMonthly: 0,
+        remainingDaily: '0',
+        remainingWeekly: '0',
+        remainingMonthly: '0',
         violatedRule: 'requireReviewBeforeFirstPay',
         violatedActual: 'first_payment',
         violatedLimit: 'review_required',
@@ -598,17 +648,17 @@ export class PolicyEngine implements IAgentPolicyEngine, IAgentAuditReader {
     }
 
     // 7. Check min balance after spend when balance context is available
-    if (minBalanceAfter > 0) {
+    if (minBalanceAfter > 0n) {
       const projectedBalance = this.extractProjectedBalanceAfter(request, amount);
       if (projectedBalance !== null && projectedBalance < minBalanceAfter) {
         return {
           allowed: false,
-          remainingDaily: 0,
-          remainingWeekly: 0,
-          remainingMonthly: 0,
+          remainingDaily: '0',
+          remainingWeekly: '0',
+          remainingMonthly: '0',
           violatedRule: 'minBalanceAfter',
-          violatedActual: String(projectedBalance),
-          violatedLimit: String(minBalanceAfter),
+          violatedActual: bigIntToAmount(projectedBalance),
+          violatedLimit: bigIntToAmount(minBalanceAfter),
         };
       }
     }
@@ -616,15 +666,15 @@ export class PolicyEngine implements IAgentPolicyEngine, IAgentAuditReader {
     // 8. Check budget limits (pass normalized conditions for limits)
     const normalizedConditions = {
       ...conditions,
-      maxAmountPerTx,
-      maxAmountPerDay,
-      maxAmountPerWeek,
-      maxAmountPerMonth,
-      minBalanceAfter,
+      maxAmountPerTx: bigIntToAmount(maxAmountPerTx),
+      maxAmountPerDay: bigIntToAmount(maxAmountPerDay),
+      maxAmountPerWeek: bigIntToAmount(maxAmountPerWeek),
+      maxAmountPerMonth: bigIntToAmount(maxAmountPerMonth),
+      minBalanceAfter: bigIntToAmount(minBalanceAfter),
     };
     const budgetResult = await this.budgetTracker.checkBudget(
       policy.agentId,
-      amount,
+      bigIntToAmount(amount),
       normalizedConditions,
     );
 
@@ -657,11 +707,15 @@ export class PolicyEngine implements IAgentPolicyEngine, IAgentAuditReader {
     return h * 60 + m;
   }
 
-  private extractAmountFromRequest(request: AgentExecutionRequest): number {
+  private extractAmountFromRequest(request: AgentExecutionRequest): bigint {
     const { action } = request;
-    if (action.type === 'transfer') return this.parseNonNegativeNumber(action.payload.amount);
-    if (action.type === 'send_transaction') return this.parseNonNegativeNumber(action.payload.value);
-    return 0;
+    if (action.type === 'transfer') {
+      return amountToBigIntNullable(action.payload.amount) ?? -1n;
+    }
+    if (action.type === 'send_transaction') {
+      return amountToBigIntNullable(action.payload.value) ?? -1n;
+    }
+    return 0n;
   }
 
   private extractToAddress(request: AgentExecutionRequest): string | null {
@@ -699,64 +753,34 @@ export class PolicyEngine implements IAgentPolicyEngine, IAgentAuditReader {
 
   private extractProjectedBalanceAfter(
     request: AgentExecutionRequest,
-    amount: number,
-  ): number | null {
+    amount: bigint,
+  ): bigint | null {
     const payload = request.action.payload as unknown as Record<string, unknown>;
-    const balanceBefore =
-      this.parseMaybeNumber(payload.currentBalance) ??
-      this.parseMaybeNumber(payload.balance) ??
-      this.parseMaybeNumber(payload.balanceBefore);
+    const candidates = [
+      payload.currentBalance,
+      payload.balance,
+      payload.balanceBefore,
+    ];
+    const balanceBefore = candidates
+      .map(amountToBigIntNullable)
+      .find((x) => x !== null && x >= 0n) ?? null;
 
     if (balanceBefore === null) return null;
     return balanceBefore - amount;
   }
 
-  private parseMaybeNumber(value: unknown): number | null {
-    if (value === undefined || value === null) return null;
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-
-  private parseNonNegativeNumber(value: unknown): number {
-    const parsed = this.parseMaybeNumber(value);
-    if (
-      parsed === null ||
-      parsed < 0 ||
-      !Number.isInteger(parsed) ||
-      parsed > MAX_SAFE_AMOUNT
-    ) {
-      return 0;
-    }
-    return parsed;
-  }
-
-  /** Normalize policy condition number (undefined/NaN → 0, negative → 0). */
-  private normalizeNonNegativeNumber(value: unknown): number {
-    const n = this.parseMaybeNumber(value);
-    if (
-      n === null ||
-      n < 0 ||
-      !Number.isInteger(n) ||
-      n > MAX_SAFE_AMOUNT
-    ) {
-      return 0;
-    }
-    return n;
-  }
-
   private extractAmount(
     result: AgentExecutionResult,
     request?: AgentExecutionRequest,
-  ): number {
+  ): bigint {
     if (request) {
       return this.extractAmountFromRequest(request);
     }
 
-    const amount =
-      this.parseMaybeNumber((result as unknown as Record<string, unknown>).amount) ??
-      this.parseMaybeNumber((result as unknown as Record<string, unknown>).value);
-
-    return amount ?? 0;
+    const amount = (result as unknown as Record<string, unknown>).amount;
+    return amountToBigInt(
+      amount ?? (result as unknown as Record<string, unknown>).value,
+    );
   }
 
   private getPolicyById(policyId: string): AgentPolicy | undefined {

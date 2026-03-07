@@ -150,7 +150,7 @@ describe('Identity Module', () => {
       expect(hasCertificateCapability(cert, 'negotiation')).toBe(false);
     });
 
-    it('should verify certificate with trusted xidentity (Bug #10)', async () => {
+    it('should verify certificate with trusted xidentity anchor', async () => {
       const cert = await createAgentCertificate({
         mnemonic: 'test',
         passphrase: 'pass',
@@ -168,8 +168,10 @@ describe('Identity Module', () => {
       // Verify with wrong trusted xidentity should fail (trust anchor mismatch)
       expect(verifyCertificate(cert, 'wrong_xidentity_b64')).toBe(false);
 
-      // Verify without trust anchor (self-verify, backward compatible)
-      expect(verifyCertificate(cert)).toBe(true);
+      // Verify without trust anchor must now fail (prevents self-verification).
+      expect(
+        (verifyCertificate as unknown as (c: typeof cert, a?: string) => boolean)(cert),
+      ).toBe(false);
     });
   });
 

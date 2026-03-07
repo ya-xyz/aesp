@@ -35,3 +35,15 @@ export {
   hashCommitment,
   generateUUID,
 } from './hashing.js';
+
+export {
+  loadProvingKey,
+  loadVerifyingKey,
+  isZkReady,
+  resetZkKeys,
+  supportsZkAce,
+  zkSetup,
+  zkSetupAndLoad,
+  zkProve,
+  zkVerify,
+} from './zk-prover.js';

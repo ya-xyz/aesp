@@ -224,13 +224,29 @@ export function getMCPTool(name: MCPToolName): MCPToolDefinition | undefined {
 }
 
 const MAX_STRING_LENGTH = 10_000;
-const MAX_AMOUNT = Number.MAX_SAFE_INTEGER;
+const MAX_DECIMAL_PLACES = 18;
+const DECIMAL_AMOUNT_PATTERN = /^(?:0|[1-9]\d*)(?:\.(\d+))?$/;
 
-function parseNonNegativeNumber(value: unknown): number | null {
-  if (value === undefined || value === null) return null;
-  const n = typeof value === 'string' ? Number(value) : Number(value);
-  if (!Number.isFinite(n) || n < 0 || n > MAX_AMOUNT) return null;
-  return n;
+function parseNonNegativeAmount(value: unknown): boolean {
+  if (value === undefined || value === null) return false;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || value < 0 || !Number.isSafeInteger(value)) {
+      return false;
+    }
+    return true;
+  }
+
+  if (typeof value === 'bigint') {
+    return value >= 0n;
+  }
+
+  if (typeof value !== 'string') return false;
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  const m = DECIMAL_AMOUNT_PATTERN.exec(trimmed);
+  if (!m) return false;
+  const fraction = m[1];
+  return !fraction || fraction.length <= MAX_DECIMAL_PLACES;
 }
 
 function validateStringLength(value: unknown, maxLen: number): boolean {
@@ -271,8 +287,7 @@ export function validateToolArgs(
     if (!(key in args)) continue;
     const v = args[key];
     if (v === undefined || v === null) continue;
-    const n = parseNonNegativeNumber(v);
-    if (n === null) {
+    if (!parseNonNegativeAmount(v)) {
       return `Invalid ${key}: must be a non-negative number`;
     }
   }

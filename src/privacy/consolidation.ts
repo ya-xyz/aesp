@@ -124,7 +124,7 @@ export class ConsolidationScheduler {
     const ratio = Math.max(0, Math.min(1, jitterRatio));
     const min = baseMs * (1 - ratio);
     const max = baseMs * (1 + ratio);
-    return Math.floor(min + Math.random() * (max - min));
+    return Math.floor(min + ConsolidationScheduler.randomFloat() * (max - min));
   }
 
   /**
@@ -132,7 +132,10 @@ export class ConsolidationScheduler {
    * @internal
    */
   static randomInRange(min: number, max: number): number {
-    return Math.floor(min + Math.random() * (max - min));
+    const safeMin = Math.min(min, max);
+    const safeMax = Math.max(min, max);
+    if (safeMax <= safeMin) return safeMin;
+    return safeMin + Math.floor(ConsolidationScheduler.randomFloat() * (safeMax - safeMin));
   }
 
   // ─── Scheduling ───────────────────────────────────────────────────────
@@ -445,11 +448,21 @@ export class ConsolidationScheduler {
    */
   static shuffleArray<T>(array: T[]): void {
     for (let i = array.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
+      const j = Math.floor(ConsolidationScheduler.randomFloat() * (i + 1));
       const tmp = array[i];
       array[i] = array[j];
       array[j] = tmp;
     }
+  }
+
+  private static randomFloat(): number {
+    const cryptoObj = (globalThis as unknown as { crypto?: { getRandomValues?: (arr: Uint32Array) => void } }).crypto;
+    if (cryptoObj?.getRandomValues) {
+      const bytes = new Uint32Array(1);
+      cryptoObj.getRandomValues(bytes);
+      return bytes[0] / 0x1_0000_0000;
+    }
+    return Math.random();
   }
 
   /**

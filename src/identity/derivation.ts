@@ -165,20 +165,17 @@ export async function createAgentCertificate(params: {
  * Verify an Agent Identity Certificate's owner signature.
  *
  * @param cert - The certificate to verify
- * @param trustedOwnerXidentity - If provided, the certificate's `ownerXidentity`
- *   must match this value before verification proceeds.  This acts as an external
- *   trust anchor: without it, the certificate is self-verifying (the embedded
- *   public key is used to verify its own signature, which any attacker can forge).
- *   **Always provide `trustedOwnerXidentity` in production** to bind verification
- *   to a known owner identity.
+ * @param trustedOwnerXidentity - Required owner trust anchor. Must match the
+ *   certificate's `ownerXidentity`.
  */
 export function verifyCertificate(
   cert: AgentIdentityCertificate,
-  trustedOwnerXidentity?: string,
+  trustedOwnerXidentity: string,
 ): boolean {
-  // If an external trust anchor is provided, ensure the certificate's
-  // ownerXidentity matches before proceeding with signature verification.
-  if (trustedOwnerXidentity && cert.ownerXidentity !== trustedOwnerXidentity) {
+  if (!trustedOwnerXidentity) {
+    return false;
+  }
+  if (cert.ownerXidentity !== trustedOwnerXidentity) {
     return false;
   }
 

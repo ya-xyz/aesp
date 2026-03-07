@@ -19,14 +19,14 @@ import type {
 // ─── Policy ──────────────────────────────────────────────────────────────────
 
 export interface PolicyConditions {
-  maxAmountPerTx: number;
-  maxAmountPerDay: number;
-  maxAmountPerWeek: number;
-  maxAmountPerMonth: number;
+  maxAmountPerTx: number | string;
+  maxAmountPerDay: number | string;
+  maxAmountPerWeek: number | string;
+  maxAmountPerMonth: number | string;
   allowListAddresses: string[];
   allowListChains: ChainId[];
   allowListMethods: string[];
-  minBalanceAfter: number;
+  minBalanceAfter: number | string;
   requireReviewBeforeFirstPay: boolean;
   timeWindow?: {
     start: string;    // HH:MM format
@@ -52,7 +52,7 @@ export interface AgentPolicy {
 // ─── Budget ──────────────────────────────────────────────────────────────────
 
 export interface BudgetTransaction {
-  amount: number;
+  amount: string | number;
   timestamp: ISOTimestamp;
   txHash: string;
   chain: ChainId;
@@ -62,9 +62,9 @@ export interface BudgetTransaction {
 
 export interface AgentBudgetTracker {
   agentId: string;
-  dailySpent: number;
-  weeklySpent: number;
-  monthlySpent: number;
+  dailySpent: string;
+  weeklySpent: string;
+  monthlySpent: string;
   lastResetDaily: ISOTimestamp;
   lastResetWeekly: ISOTimestamp;
   lastResetMonthly: ISOTimestamp;
@@ -73,9 +73,9 @@ export interface AgentBudgetTracker {
 
 export interface BudgetCheckResult {
   allowed: boolean;
-  remainingDaily: number;
-  remainingWeekly: number;
-  remainingMonthly: number;
+  remainingDaily: string;
+  remainingWeekly: string;
+  remainingMonthly: string;
   violatedRule?: string;
   violatedActual?: string;
   violatedLimit?: string;
@@ -170,7 +170,7 @@ export interface AuditEntry {
   result: AgentExecutionResult;
   timestamp: number;
   /** Amount for transfer/send_transaction; used by getUsageToday when set */
-  amount?: number;
+  amount?: number | string;
 }
 
 export interface UsageSnapshot {

@@ -324,9 +324,25 @@ describe('Policy Module', () => {
       const result = await tracker.checkBudget('agent-1', 50, conditions);
 
       expect(result.allowed).toBe(true);
-      expect(result.remainingDaily).toBe(450);
-      expect(result.remainingWeekly).toBe(1950);
-      expect(result.remainingMonthly).toBe(4950);
+      expect(result.remainingDaily).toBe('450');
+      expect(result.remainingWeekly).toBe('1950');
+      expect(result.remainingMonthly).toBe('4950');
+    });
+
+    it('should preserve high-precision decimal amounts', async () => {
+      await tracker.recordSpend('agent-1', {
+        amount: '0.000000000000000001',
+        timestamp: new Date().toISOString(),
+        txHash: '0x1',
+        chain: 'solana',
+        method: 'transfer',
+        requestId: 'r1',
+      });
+
+      const result = await tracker.checkBudget('agent-1', '0.000000000000000001', conditions);
+
+      expect(result.allowed).toBe(true);
+      expect(result.remainingDaily).toBe('499.999999999999999998');
     });
 
     it('should reject spend exceeding daily limit', async () => {
@@ -365,9 +381,9 @@ describe('Policy Module', () => {
       });
 
       const budget = tracker.getBudget('agent-1');
-      expect(budget?.dailySpent).toBe(300);
-      expect(budget?.weeklySpent).toBe(300);
-      expect(budget?.monthlySpent).toBe(300);
+      expect(budget?.dailySpent).toBe('300');
+      expect(budget?.weeklySpent).toBe('300');
+      expect(budget?.monthlySpent).toBe('300');
     });
 
     it('should get recent transactions', async () => {
@@ -382,15 +398,15 @@ describe('Policy Module', () => {
 
       const txs = tracker.getRecentTransactions('agent-1');
       expect(txs.length).toBe(1);
-      expect(txs[0].amount).toBe(100);
+      expect(txs[0].amount).toBe('100');
     });
 
     it('should reset budget', () => {
       tracker.resetBudget('agent-1');
       const budget = tracker.getBudget('agent-1');
-      expect(budget?.dailySpent).toBe(0);
-      expect(budget?.weeklySpent).toBe(0);
-      expect(budget?.monthlySpent).toBe(0);
+      expect(budget?.dailySpent).toBe('0');
+      expect(budget?.weeklySpent).toBe('0');
+      expect(budget?.monthlySpent).toBe('0');
     });
 
     it('should save and load from storage', async () => {
@@ -408,7 +424,7 @@ describe('Policy Module', () => {
       await tracker2.load();
 
       const budget = tracker2.getBudget('agent-1');
-      expect(budget?.dailySpent).toBe(100);
+      expect(budget?.dailySpent).toBe('100');
     });
   });
 

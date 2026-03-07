@@ -44,6 +44,15 @@ export {
   hashPolicy,
   hashCommitment,
   generateUUID,
+  loadProvingKey,
+  loadVerifyingKey,
+  isZkReady,
+  resetZkKeys,
+  supportsZkAce,
+  zkSetup,
+  zkSetupAndLoad,
+  zkProve,
+  zkVerify,
 } from './crypto/index.js';
 export type { AcegfWasmModule, EncryptedEnvelope } from './crypto/index.js';
 

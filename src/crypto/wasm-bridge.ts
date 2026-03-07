@@ -150,6 +150,31 @@ export interface AcegfWasmModule {
     context: string,
     message: string,
   ): string;
+
+  // ─── ZK-ACE: Zero-Knowledge Authorization (REV never leaves WASM) ────
+
+  /** One-time trusted setup for ZK-ACE circuit. Returns JSON: { pk_hex, vk_hex }. */
+  zkace_setup_wasm?(replay_mode: string): string;
+
+  /** Generate ZK-ACE proof. REV extracted from mnemonic inside WASM, never exported. */
+  zkace_prove_wasm?(
+    mnemonic: string,
+    passphrase: string,
+    salt: string,
+    alg_id: string,
+    domain: string,
+    index_val: string,
+    nonce: string,
+    tx_hash: string,
+    replay_mode: string,
+    proving_key_bytes: Uint8Array,
+  ): string;
+
+  /** Verify a ZK-ACE proof off-chain. */
+  zkace_verify_wasm?(
+    proof_json: string,
+    verifying_key_bytes: Uint8Array,
+  ): boolean;
 }
 
 // ─── Module State ────────────────────────────────────────────────────────────

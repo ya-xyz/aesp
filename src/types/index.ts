@@ -11,3 +11,4 @@ export * from './review.js';
 export * from './mcp.js';
 export * from './a2a.js';
 export * from './privacy.js';
+export * from './zk.js';
