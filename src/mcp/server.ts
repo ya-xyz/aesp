@@ -20,6 +20,7 @@ export type MCPToolHandler = (args: Record<string, unknown>) => Promise<MCPToolR
 export class MCPServer {
   private handlers: Map<string, MCPToolHandler> = new Map();
   private policyEngine: PolicyEngine | null = null;
+  private agentId: string | null = null;
 
   constructor(
     private readonly config: {
@@ -27,6 +28,15 @@ export class MCPServer {
       version?: string;
     } = {},
   ) {}
+
+  /**
+   * Set the agent identity used as vendorId in policy execution requests.
+   * When set, all policy-gated tool calls will use this ID for policy matching
+   * instead of deriving it from tool arguments (e.g., from_address).
+   */
+  setAgentId(agentId: string): void {
+    this.agentId = agentId;
+  }
 
   /**
    * Set the policy engine for checking agent budgets before tool execution.
@@ -146,6 +156,8 @@ export class MCPServer {
    */
   private buildPolicyExecutionRequest(call: MCPToolCall): AgentExecutionRequest | null {
     const args = call.arguments;
+    // Use configured agentId for policy matching, falling back to address from args
+    const vid = (fallback: string | null) => this.agentId ?? fallback;
 
     switch (call.name) {
       case 'yault_deposit': {
@@ -154,7 +166,7 @@ export class MCPServer {
         if (!address || amount === null) return null;
         return {
           requestId: generateUUID(),
-          vendorId: address,
+          vendorId: vid(address)!,
           action: {
             type: 'transfer',
             payload: {
@@ -173,7 +185,7 @@ export class MCPServer {
         if (!address || shares === null) return null;
         return {
           requestId: generateUUID(),
-          vendorId: address,
+          vendorId: vid(address)!,
           action: {
             type: 'transfer',
             payload: {
@@ -193,12 +205,32 @@ export class MCPServer {
         if (!from || !to || amount === null) return null;
         return {
           requestId: generateUUID(),
-          vendorId: from,
+          vendorId: vid(from)!,
           action: {
             type: 'transfer',
             payload: {
               chainId: 'evm',
               token: this.asString(args.currency) ?? 'USDC',
+              toAddress: to,
+              amount,
+            },
+          },
+        };
+      }
+
+      case 'yault_send_payment': {
+        const from = this.asString(args.from_address);
+        const to = this.asString(args.to_address);
+        const amount = this.asAmount(args.amount);
+        if (!from || !to || amount === null) return null;
+        return {
+          requestId: generateUUID(),
+          vendorId: vid(from)!,
+          action: {
+            type: 'transfer',
+            payload: {
+              chainId: 'evm',
+              token: 'WETH',
               toAddress: to,
               amount,
             },

@@ -114,6 +114,33 @@ export const MCP_TOOLS: Record<MCPToolName, MCPToolDefinition> = {
       required: ['address'],
     },
   },
+
+  yault_send_payment: {
+    name: 'yault_send_payment',
+    description: 'Send tokens from a wallet to an arbitrary recipient address (direct ERC-20 transfer)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        from_address: {
+          type: 'string',
+          description: 'Sender wallet address (must match API key owner)',
+        },
+        to_address: {
+          type: 'string',
+          description: 'Recipient wallet address',
+        },
+        amount: {
+          type: 'string',
+          description: 'Amount to send in underlying asset units (e.g., "0.1" WETH)',
+        },
+        memo: {
+          type: 'string',
+          description: 'Optional memo/note for the payment',
+        },
+      },
+      required: ['from_address', 'to_address', 'amount'],
+    },
+  },
 };
 
 // ─── Helper ──────────────────────────────────────────────────────────────────

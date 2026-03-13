@@ -1,6 +1,6 @@
 {
   "name": "@yault/aesp",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Agent Economic Sovereignty Protocol — defining how AI agents operate economically under human sovereignty",
   "type": "module",
   "main": "dist/index.js",

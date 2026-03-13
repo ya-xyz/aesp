@@ -162,6 +162,21 @@ server.tool(
   },
 );
 
+server.tool(
+  'yault_send_payment',
+  'Send tokens from a wallet to an arbitrary recipient address (direct ERC-20 transfer)',
+  {
+    from_address: z.string().describe('Sender wallet address (must match API key owner)'),
+    to_address: z.string().describe('Recipient wallet address'),
+    amount: z.string().describe('Amount to send in underlying asset units (e.g., "0.1" WETH)'),
+    memo: z.string().optional().describe('Optional memo/note for the payment'),
+  },
+  async ({ from_address, to_address, amount, memo }) => {
+    const data = await yaultPost('/api/vault/send', { from_address, to_address, amount, memo });
+    return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
 // ─── Start ──────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {

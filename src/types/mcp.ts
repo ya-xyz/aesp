@@ -32,7 +32,8 @@ export type MCPToolName =
   | 'yault_redeem'
   | 'yault_transfer'
   | 'yault_check_authorization'
-  | 'yault_get_balances';
+  | 'yault_get_balances'
+  | 'yault_send_payment';
 
 // ─── MCP Tool Call / Result ──────────────────────────────────────────────────
 
