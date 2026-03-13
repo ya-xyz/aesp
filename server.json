@@ -3,7 +3,7 @@
   "name": "xyz.yault/aesp",
   "title": "Yault AESP",
   "description": "Crypto payments for the agent economy — policy-gated vault operations under human control",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "websiteUrl": "https://yault.xyz",
   "repository": {
     "url": "https://github.com/ya-xyz/aesp",
@@ -13,7 +13,7 @@
     {
       "registryType": "npm",
       "identifier": "@yault/aesp",
-      "version": "0.1.1",
+      "version": "0.2.0",
       "runtimeHint": "node",
       "transport": {
         "type": "stdio"
