@@ -76,7 +76,7 @@ export class MCPServer {
       }
     }
 
-    // 2. Find handler
+    // 3. Find handler
     const handler = this.handlers.get(call.name);
     if (!handler) {
       return {
@@ -85,7 +85,7 @@ export class MCPServer {
       };
     }
 
-    // 3. Execute handler
+    // 4. Execute handler
     try {
       return await handler(call.arguments);
     } catch (error) {
@@ -150,7 +150,6 @@ export class MCPServer {
     switch (call.name) {
       case 'yault_deposit': {
         const address = this.asString(args.address);
-        const chainId = this.asString(args.chain) ?? 'unknown';
         const amount = this.asAmount(args.amount);
         if (!address || amount === null) return null;
         return {
@@ -159,8 +158,8 @@ export class MCPServer {
           action: {
             type: 'transfer',
             payload: {
-              chainId,
-              token: 'native',
+              chainId: 'evm',
+              token: 'USDC',
               toAddress: address,
               amount,
             },
@@ -170,7 +169,6 @@ export class MCPServer {
 
       case 'yault_redeem': {
         const address = this.asString(args.address);
-        const chainId = this.asString(args.chain) ?? 'unknown';
         const shares = this.asAmount(args.shares);
         if (!address || shares === null) return null;
         return {
@@ -179,8 +177,8 @@ export class MCPServer {
           action: {
             type: 'transfer',
             payload: {
-              chainId,
-              token: 'native',
+              chainId: 'evm',
+              token: 'USDC',
               toAddress: address,
               amount: shares,
             },
@@ -188,9 +186,9 @@ export class MCPServer {
         };
       }
 
-      case 'yault_create_allowance': {
-        const from = this.asString(args.from_wallet_id);
-        const to = this.asString(args.to_wallet_id);
+      case 'yault_transfer': {
+        const from = this.asString(args.from_address);
+        const to = this.asString(args.to_address);
         const amount = this.asAmount(args.amount);
         if (!from || !to || amount === null) return null;
         return {
@@ -199,8 +197,8 @@ export class MCPServer {
           action: {
             type: 'transfer',
             payload: {
-              chainId: 'unknown',
-              token: 'native',
+              chainId: 'evm',
+              token: this.asString(args.currency) ?? 'USDC',
               toAddress: to,
               amount,
             },

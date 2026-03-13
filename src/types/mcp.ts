@@ -30,11 +30,9 @@ export type MCPToolName =
   | 'yault_check_balance'
   | 'yault_deposit'
   | 'yault_redeem'
-  | 'yault_create_allowance'
-  | 'yault_cancel_allowance'
-  | 'yault_file_dispute'
-  | 'yault_check_budget'
-  | 'yault_list_agents';
+  | 'yault_transfer'
+  | 'yault_check_authorization'
+  | 'yault_get_balances';
 
 // ─── MCP Tool Call / Result ──────────────────────────────────────────────────
 

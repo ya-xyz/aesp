@@ -1,5 +1,9 @@
 /**
  * AESP — MCP Module Exports
+ *
+ * The standalone MCP stdio server is at ./stdio-server.ts and is started via:
+ *   npx @yault/aesp        (bin: yault-mcp)
+ *   node dist/mcp/stdio-server.js
  */
 
 export {

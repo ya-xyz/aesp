@@ -9,3 +9,5 @@ coverage/
 .idea/
 .claude/
 docs/
+experiements/
+.tmp-translate-venv/

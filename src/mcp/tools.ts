@@ -1,7 +1,7 @@
 /**
  * AESP — MCP Tool Definitions
  *
- * Defines the 8 MCP tools that expose Yault agent capabilities
+ * Defines the 6 MCP tools that expose Yault agent capabilities
  * to external AI agent frameworks (Claude, LangChain, etc.).
  */
 
@@ -12,24 +12,16 @@ import type { MCPToolDefinition, MCPToolName } from '../types/mcp.js';
 export const MCP_TOOLS: Record<MCPToolName, MCPToolDefinition> = {
   yault_check_balance: {
     name: 'yault_check_balance',
-    description: 'Check the balance of an agent account on a specific chain',
+    description: 'Check the vault balance for a wallet address',
     inputSchema: {
       type: 'object',
       properties: {
         address: {
           type: 'string',
-          description: 'Wallet address or agent account ID',
-        },
-        chain: {
-          type: 'string',
-          description: 'Blockchain to check (solana, ethereum, polygon, base, arbitrum)',
-        },
-        token: {
-          type: 'string',
-          description: 'Token to check balance for (native or contract address). Defaults to native.',
+          description: 'Wallet address (hex, with or without 0x prefix)',
         },
       },
-      required: ['address', 'chain'],
+      required: ['address'],
     },
   },
 
@@ -41,22 +33,14 @@ export const MCP_TOOLS: Record<MCPToolName, MCPToolDefinition> = {
       properties: {
         address: {
           type: 'string',
-          description: 'Agent wallet address',
+          description: 'Agent wallet address (must match the API key owner)',
         },
         amount: {
           type: 'string',
-          description: 'Amount to deposit in underlying asset units (e.g., USDC amount)',
-        },
-        chain: {
-          type: 'string',
-          description: 'Target chain for deposit',
-        },
-        vault_id: {
-          type: 'string',
-          description: 'Specific vault ID to deposit into. If omitted, uses default agent vault.',
+          description: 'Amount to deposit in underlying asset units (e.g., "100.5" USDC)',
         },
       },
-      required: ['address', 'amount', 'chain'],
+      required: ['address', 'amount'],
     },
   },
 
@@ -68,141 +52,66 @@ export const MCP_TOOLS: Record<MCPToolName, MCPToolDefinition> = {
       properties: {
         address: {
           type: 'string',
-          description: 'Agent wallet address',
+          description: 'Agent wallet address (must match the API key owner)',
         },
         shares: {
           type: 'string',
-          description: 'Number of vault shares to redeem',
-        },
-        chain: {
-          type: 'string',
-          description: 'Chain to redeem on',
-        },
-        vault_id: {
-          type: 'string',
-          description: 'Vault ID to redeem from',
+          description: 'Number of vault shares to redeem (use "max" to redeem all)',
         },
       },
-      required: ['address', 'shares', 'chain'],
+      required: ['address', 'shares'],
     },
   },
 
-  yault_create_allowance: {
-    name: 'yault_create_allowance',
-    description: 'Create a one-time or recurring payment allowance from one agent account to another',
+  yault_transfer: {
+    name: 'yault_transfer',
+    description: 'Transfer vault shares from one account to another (must be parent→sub-account)',
     inputSchema: {
       type: 'object',
       properties: {
-        from_wallet_id: {
+        from_address: {
           type: 'string',
-          description: "Sender agent's Yault account ID",
+          description: 'Sender wallet address (must match API key owner)',
         },
-        to_wallet_id: {
+        to_address: {
           type: 'string',
-          description: "Recipient's Yault account ID",
+          description: 'Recipient wallet address (must be an active sub-account)',
         },
         amount: {
           type: 'string',
-          description: 'Amount in underlying asset (e.g., USDC)',
+          description: 'Amount to transfer in underlying asset units',
         },
-        type: {
+        currency: {
           type: 'string',
-          description: 'Allowance type: one_time or recurring',
-          enum: ['one_time', 'recurring'],
-        },
-        frequency: {
-          type: 'string',
-          description: 'Frequency for recurring allowances',
-          enum: ['daily', 'weekly', 'monthly'],
-        },
-        memo: {
-          type: 'string',
-          description: 'Human-readable description of the payment',
+          description: 'Currency (default: "USDC")',
         },
       },
-      required: ['from_wallet_id', 'to_wallet_id', 'amount', 'type'],
+      required: ['from_address', 'to_address', 'amount'],
     },
   },
 
-  yault_cancel_allowance: {
-    name: 'yault_cancel_allowance',
-    description: 'Cancel an existing payment allowance',
+  yault_check_authorization: {
+    name: 'yault_check_authorization',
+    description: 'Check agent authorization status: operator address, on-chain allowances, and chain config',
     inputSchema: {
       type: 'object',
-      properties: {
-        allowance_id: {
-          type: 'string',
-          description: 'The allowance ID to cancel',
-        },
-      },
-      required: ['allowance_id'],
+      properties: {},
+      required: [],
     },
   },
 
-  yault_file_dispute: {
-    name: 'yault_file_dispute',
-    description: 'File a dispute through the Yault authority judgment system. Triggers the on-chain arbitration flow.',
+  yault_get_balances: {
+    name: 'yault_get_balances',
+    description: 'Get comprehensive balance breakdown including vault shares, underlying assets, and yield',
     inputSchema: {
       type: 'object',
       properties: {
-        wallet_id: {
+        address: {
           type: 'string',
-          description: 'The wallet ID filing the dispute',
-        },
-        recipient_index: {
-          type: 'string',
-          description: 'Index of the recipient in the dispute',
-        },
-        reason_code: {
-          type: 'string',
-          description: 'Dispute reason code',
-          enum: ['unauthorized_tx', 'non_delivery', 'quality_issue', 'overcharge', 'other'],
-        },
-        evidence_hash: {
-          type: 'string',
-          description: 'Arweave hash or IPFS CID of evidence documents',
-        },
-        description: {
-          type: 'string',
-          description: 'Human-readable description of the dispute',
+          description: 'Wallet address',
         },
       },
-      required: ['wallet_id', 'recipient_index', 'reason_code', 'evidence_hash'],
-    },
-  },
-
-  yault_check_budget: {
-    name: 'yault_check_budget',
-    description: 'Check the remaining budget for an agent (daily, weekly, monthly spending limits)',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        agent_id: {
-          type: 'string',
-          description: 'The agent ID to check budget for',
-        },
-      },
-      required: ['agent_id'],
-    },
-  },
-
-  yault_list_agents: {
-    name: 'yault_list_agents',
-    description: 'List all agent sub-accounts under a parent wallet with their status, budget, and recent activity',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        parent_wallet_id: {
-          type: 'string',
-          description: 'Parent wallet ID to list agents for',
-        },
-        status_filter: {
-          type: 'string',
-          description: 'Filter by agent status',
-          enum: ['active', 'frozen', 'expired', 'all'],
-        },
-      },
-      required: ['parent_wallet_id'],
+      required: ['address'],
     },
   },
 };
@@ -292,19 +201,12 @@ export function validateToolArgs(
     }
   }
 
-  if ('evidence_hash' in args && args.evidence_hash != null) {
-    if (!validateStringLength(args.evidence_hash, MAX_STRING_LENGTH)) {
-      return `evidence_hash must be at most ${MAX_STRING_LENGTH} characters`;
-    }
-  }
-  if ('description' in args && args.description != null) {
-    if (!validateStringLength(args.description, MAX_STRING_LENGTH)) {
-      return `description must be at most ${MAX_STRING_LENGTH} characters`;
-    }
-  }
-  if ('memo' in args && args.memo != null) {
-    if (!validateStringLength(args.memo, MAX_STRING_LENGTH)) {
-      return `memo must be at most ${MAX_STRING_LENGTH} characters`;
+  // Validate string length for free-text fields
+  for (const key of ['currency']) {
+    if (key in args && args[key] != null) {
+      if (!validateStringLength(args[key], MAX_STRING_LENGTH)) {
+        return `${key} must be at most ${MAX_STRING_LENGTH} characters`;
+      }
     }
   }
 

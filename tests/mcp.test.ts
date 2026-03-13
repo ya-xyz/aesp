@@ -20,9 +20,9 @@ describe('MCP Module', () => {
   // ─── Tool Definitions ───────────────────────────────────────────────────
 
   describe('Tool Definitions', () => {
-    it('should have 8 tool definitions', () => {
+    it('should have 6 tool definitions', () => {
       const tools = getAllMCPTools();
-      expect(tools.length).toBe(8);
+      expect(tools.length).toBe(6);
     });
 
     it('should have correct tool names', () => {
@@ -30,11 +30,18 @@ describe('MCP Module', () => {
       expect(names).toContain('yault_check_balance');
       expect(names).toContain('yault_deposit');
       expect(names).toContain('yault_redeem');
-      expect(names).toContain('yault_create_allowance');
-      expect(names).toContain('yault_cancel_allowance');
-      expect(names).toContain('yault_file_dispute');
-      expect(names).toContain('yault_check_budget');
-      expect(names).toContain('yault_list_agents');
+      expect(names).toContain('yault_transfer');
+      expect(names).toContain('yault_check_authorization');
+      expect(names).toContain('yault_get_balances');
+    });
+
+    it('should not contain removed tool names', () => {
+      const names = getAllMCPTools().map((t) => t.name);
+      expect(names).not.toContain('yault_create_allowance');
+      expect(names).not.toContain('yault_cancel_allowance');
+      expect(names).not.toContain('yault_file_dispute');
+      expect(names).not.toContain('yault_check_budget');
+      expect(names).not.toContain('yault_list_agents');
     });
 
     it('should get tool by name', () => {
@@ -44,78 +51,107 @@ describe('MCP Module', () => {
       expect(tool?.inputSchema.type).toBe('object');
     });
 
-    it('should have required fields in schemas', () => {
-      const tool = getMCPTool('yault_create_allowance');
-      expect(tool?.inputSchema.required).toContain('from_wallet_id');
-      expect(tool?.inputSchema.required).toContain('to_wallet_id');
-      expect(tool?.inputSchema.required).toContain('amount');
-      expect(tool?.inputSchema.required).toContain('type');
+    it('should have correct required fields for check_balance', () => {
+      const tool = getMCPTool('yault_check_balance');
+      expect(tool?.inputSchema.required).toEqual(['address']);
     });
 
-    it('should have enum values where applicable', () => {
-      const tool = getMCPTool('yault_create_allowance');
-      expect(tool?.inputSchema.properties.type.enum).toEqual(['one_time', 'recurring']);
-      expect(tool?.inputSchema.properties.frequency.enum).toEqual(['daily', 'weekly', 'monthly']);
+    it('should have correct required fields for deposit', () => {
+      const tool = getMCPTool('yault_deposit');
+      expect(tool?.inputSchema.required).toEqual(['address', 'amount']);
+    });
+
+    it('should have correct required fields for redeem', () => {
+      const tool = getMCPTool('yault_redeem');
+      expect(tool?.inputSchema.required).toEqual(['address', 'shares']);
+    });
+
+    it('should have correct required fields for transfer', () => {
+      const tool = getMCPTool('yault_transfer');
+      expect(tool?.inputSchema.required).toContain('from_address');
+      expect(tool?.inputSchema.required).toContain('to_address');
+      expect(tool?.inputSchema.required).toContain('amount');
+    });
+
+    it('should have no required fields for check_authorization', () => {
+      const tool = getMCPTool('yault_check_authorization');
+      expect(tool?.inputSchema.required).toEqual([]);
+    });
+
+    it('should have correct required fields for get_balances', () => {
+      const tool = getMCPTool('yault_get_balances');
+      expect(tool?.inputSchema.required).toEqual(['address']);
     });
   });
 
   // ─── Validation ─────────────────────────────────────────────────────────
 
   describe('Tool Argument Validation', () => {
-    it('should accept valid arguments', () => {
+    it('should accept valid check_balance arguments', () => {
       const error = validateToolArgs('yault_check_balance', {
         address: '0x123',
-        chain: 'solana',
       });
       expect(error).toBeNull();
     });
 
+    it('should accept valid deposit arguments', () => {
+      const error = validateToolArgs('yault_deposit', {
+        address: '0x123',
+        amount: '100.5',
+      });
+      expect(error).toBeNull();
+    });
+
+    it('should accept valid transfer arguments', () => {
+      const error = validateToolArgs('yault_transfer', {
+        from_address: '0xabc',
+        to_address: '0xdef',
+        amount: '50',
+      });
+      expect(error).toBeNull();
+    });
+
+    it('should accept transfer with optional currency', () => {
+      const error = validateToolArgs('yault_transfer', {
+        from_address: '0xabc',
+        to_address: '0xdef',
+        amount: '50',
+        currency: 'USDC',
+      });
+      expect(error).toBeNull();
+    });
+
+    it('should accept check_authorization with no args', () => {
+      const error = validateToolArgs('yault_check_authorization', {});
+      expect(error).toBeNull();
+    });
+
     it('should accept high-precision amount strings', () => {
-      const error = validateToolArgs('yault_create_allowance', {
-        from_wallet_id: 'w1',
-        to_wallet_id: 'w2',
+      const error = validateToolArgs('yault_deposit', {
+        address: '0x123',
         amount: '0.000000000000000001',
-        type: 'recurring',
       });
       expect(error).toBeNull();
     });
 
     it('should reject missing required fields', () => {
-      const error = validateToolArgs('yault_check_balance', {
+      const error = validateToolArgs('yault_check_balance', {});
+      expect(error).toContain('Missing required parameter: address');
+    });
+
+    it('should reject missing amount for deposit', () => {
+      const error = validateToolArgs('yault_deposit', {
         address: '0x123',
       });
-      expect(error).toContain('Missing required parameter: chain');
+      expect(error).toContain('Missing required parameter: amount');
     });
 
     it('should reject overly precise amount values', () => {
-      const error = validateToolArgs('yault_create_allowance', {
-        from_wallet_id: 'w1',
-        to_wallet_id: 'w2',
+      const error = validateToolArgs('yault_deposit', {
+        address: '0x123',
         amount: '0.0000000000000000001',
-        type: 'recurring',
       });
       expect(error).toContain('Invalid amount');
-    });
-
-    it('should reject invalid enum values', () => {
-      const error = validateToolArgs('yault_create_allowance', {
-        from_wallet_id: 'w1',
-        to_wallet_id: 'w2',
-        amount: '100',
-        type: 'invalid_type',
-      });
-      expect(error).toContain('Invalid value for type');
-    });
-
-    it('should accept valid enum values', () => {
-      const error = validateToolArgs('yault_create_allowance', {
-        from_wallet_id: 'w1',
-        to_wallet_id: 'w2',
-        amount: '100',
-        type: 'recurring',
-        frequency: 'monthly',
-      });
-      expect(error).toBeNull();
     });
 
     it('should reject unknown tool names', () => {
@@ -135,7 +171,7 @@ describe('MCP Module', () => {
 
     it('should register handlers', () => {
       server.registerHandler('yault_check_balance', async (args) => {
-        return createToolResult({ balance: '1000', chain: args.chain });
+        return createToolResult({ balance: '1000' });
       });
 
       expect(server.getRegisteredHandlers()).toContain('yault_check_balance');
@@ -143,23 +179,23 @@ describe('MCP Module', () => {
 
     it('should handle tool calls', async () => {
       server.registerHandler('yault_check_balance', async (args) => {
-        return createToolResult({ balance: '1000', chain: args.chain });
+        return createToolResult({ balance: '1000', address: args.address });
       });
 
       const result = await server.handleToolCall({
         name: 'yault_check_balance',
-        arguments: { address: '0x123', chain: 'solana' },
+        arguments: { address: '0x123' },
       });
 
       expect(result.isError).toBeUndefined();
       expect(result.content[0].type).toBe('json');
-      expect(result.content[0].json).toEqual({ balance: '1000', chain: 'solana' });
+      expect(result.content[0].json).toEqual({ balance: '1000', address: '0x123' });
     });
 
     it('should return error for unregistered handler', async () => {
       const result = await server.handleToolCall({
         name: 'yault_check_balance',
-        arguments: { address: '0x123', chain: 'solana' },
+        arguments: { address: '0x123' },
       });
 
       expect(result.isError).toBe(true);
@@ -167,13 +203,13 @@ describe('MCP Module', () => {
     });
 
     it('should return validation error for invalid args', async () => {
-      server.registerHandler('yault_check_balance', async () => {
+      server.registerHandler('yault_deposit', async () => {
         return createToolResult({});
       });
 
       const result = await server.handleToolCall({
-        name: 'yault_check_balance',
-        arguments: { address: '0x123' }, // missing chain
+        name: 'yault_deposit',
+        arguments: { address: '0x123' }, // missing amount
       });
 
       expect(result.isError).toBe(true);
@@ -187,7 +223,7 @@ describe('MCP Module', () => {
 
       const result = await server.handleToolCall({
         name: 'yault_check_balance',
-        arguments: { address: '0x123', chain: 'solana' },
+        arguments: { address: '0x123' },
       });
 
       expect(result.isError).toBe(true);
@@ -200,7 +236,7 @@ describe('MCP Module', () => {
       expect(config.name).toBe('test-server');
       expect(config.version).toBe('0.1.0');
       expect(config.transport).toBe('stdio');
-      expect(config.tools.length).toBe(8);
+      expect(config.tools.length).toBe(6);
       expect(config.resources?.length).toBeGreaterThan(0);
     });
   });
