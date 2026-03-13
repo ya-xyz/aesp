@@ -1,255 +1,166 @@
-# AESP — Agent Economic Sovereignty Protocol
+# AESP - Agent Economic Sovereignty Protocol
 
 **Defining how AI agents operate economically under human sovereignty.**
 
-AESP is a TypeScript protocol SDK that enables AI agents to autonomously negotiate, transact, and settle payments — all within human-defined policy boundaries. It bridges the gap between autonomous agent capabilities and the non-negotiable requirement for human control over economic actions.
+[Website](https://yault.xyz) | [npm](https://www.npmjs.com/package/@yault/aesp)
 
-```
-┌─────────────────────────────────────────────────┐
-│  DSE (Digital Sovereign Entity)                  │
-│  Human controls everything via Yallet            │
-├─────────────────────────────────────────────────┤
-│  AESP Protocol Layer                             │
-│  Identity │ Policy │ Negotiation │ Commitment    │
-│  Review   │ MCP    │ A2A         │ Privacy       │
-├─────────────────────────────────────────────────┤
-│  MCP / A2A / AP2 Bridge                          │
-│  External AI frameworks discover & call Yault    │
-├─────────────────────────────────────────────────┤
-│  Yault Settlement Layer                          │
-│  Vaults │ Escrow │ Allowances │ Authority        │
-└─────────────────────────────────────────────────┘
-```
+## What Is AESP
 
-## Core Idea
+AESP is a TypeScript SDK and MCP integration layer for agent payments under explicit human control. It is designed so that agents can execute economic actions while humans retain full economic sovereignty.
 
-Agents should be economically capable but never economically sovereign. AESP enforces this principle through:
+Core principles:
 
-- **Policy-gated execution** — Every agent action is checked against human-defined spending limits, allowlists, time windows, and chain restrictions before it can proceed.
-- **Human-in-the-loop review** — Actions that exceed policy boundaries are routed to the human's mobile device for biometric approval.
-- **Cryptographic commitments** — Agent-to-agent agreements are structured as EIP-712 typed data, signed by both parties, and settled on-chain via escrow.
-- **Context-isolated privacy** — Each transaction uses HKDF-derived ephemeral addresses so that on-chain activity cannot be correlated across agent contexts.
-
-## Modules
-
-| Module | Description |
-|---|---|
-| **Identity** | BIP44-derived agent keypairs, identity certificates, and hierarchy management (human → parent agent → sub-agents, max 5 levels) |
-| **Policy** | Authorization engine with per-tx/daily/weekly/monthly budget tracking, allowlist enforcement, time-window restrictions, and critical policy change escalation (auto / review / biometric) |
-| **Negotiation** | FSM-based agent-to-agent negotiation protocol with E2E encrypted messaging, counter-offers, and automatic agreement hashing |
-| **Commitment** | EIP-712 structured commitment builder with dual-signing (buyer + seller), status lifecycle tracking, and escrow integration |
-| **Review** | Human-in-the-loop approval queue with urgency levels, expiration deadlines, event-driven notifications, and emergency agent freeze |
-| **MCP** | Model Context Protocol tool definitions (8 tools) for balance checks, deposits, redemptions, allowances, disputes, and agent management |
-| **A2A** | Google A2A agent card generation for cross-framework agent discovery and capability advertisement |
-| **Privacy** | Context-isolated ephemeral address pools, Arweave-archived audit context tags, batched consolidation with timing jitter and shuffle |
-| **Crypto** | Ed25519/secp256k1 signing, ECDH encryption, SHA-256 hashing via WASM (acegf) with Web Crypto fallback |
+- **Policy-gated execution** -- every spend action is bounded by configurable policy rules (per-tx limits, daily/weekly/monthly budgets, address allowlists, time windows).
+- **Human override path** -- risky actions are escalated to a review queue instead of being auto-approved.
+- **Verifiable commitments** -- execution context can be tied to EIP-712 signed intent, enabling on-chain settlement guarantees.
+- **Practical integration** -- MCP tools expose vault operations to AI agent frameworks; subpath exports let you import only what you need.
 
 ## Install
 
 ```bash
-npm install @yallet/aesp
+npm install @yault/aesp
 ```
+
+Requires Node.js >= 18.
 
 ## Quick Start
 
-```typescript
-import {
-  initWasm,
-  deriveAgentIdentity,
-  createAgentCertificate,
-  PolicyEngine,
-  BudgetTracker,
-  NegotiationProtocol,
-  CommitmentBuilder,
-  ReviewManager,
-} from '@yallet/aesp';
+### Add to Claude Desktop
 
-// 1. Initialize WASM crypto backend
-const wasmBinary = await fetch('/wasm/acegf_bg.wasm').then(r => r.arrayBuffer());
-await initWasm(wasmBinary);
+Add the following to your Claude Desktop config (`claude_desktop_config.json`):
 
-// 2. Derive an agent identity from the owner's mnemonic
-const agent = await deriveAgentIdentity({
-  mnemonic: 'your mnemonic ...',
-  passphrase: '',
-  agentIndex: 0,
-  label: 'grocery-shopper',
-});
-
-// 3. Create a signed identity certificate
-const cert = await createAgentCertificate({
-  agentId: agent.agentId,
-  agentPublicKey: agent.publicKey,
-  ownerXidentity: 'base64-owner-xidentity',
-  ownerMnemonic: 'your mnemonic ...',
-  ownerPassphrase: '',
-  capabilities: ['payment', 'negotiation'],
-  policyHash: '0x...',
-  maxAutonomousAmount: '50.00',
-  supportedChains: ['solana', 'ethereum'],
-});
-
-// 4. Set up policy engine with spending rules
-const policyEngine = new PolicyEngine();
-policyEngine.addPolicy({
-  id: 'grocery-policy',
-  agentId: agent.agentId,
-  ownerXidentity: 'base64-owner-xidentity',
-  scope: 'auto_payment',
-  conditions: {
-    maxAmountPerTx: '20.00',
-    maxAmountPerDay: '100.00',
-    allowListChains: ['solana'],
-  },
-  createdAt: new Date().toISOString(),
-  expiresAt: new Date(Date.now() + 30 * 86400000).toISOString(),
-});
-
-// 5. Check if an action is auto-approved
-const policyId = await policyEngine.checkAutoApprove({
-  id: 'req-1',
-  agentId: agent.agentId,
-  action: { type: 'transfer', to: '0x...', amount: '15.00', chain: 'solana' },
-  requestedAt: new Date().toISOString(),
-});
-
-if (policyId) {
-  // Auto-approved — proceed with execution
-} else {
-  // Route to human review
+```json
+{
+  "mcpServers": {
+    "yault": {
+      "command": "npx",
+      "args": ["-y", "@yault/aesp"],
+      "env": {
+        "YAULT_API_KEY": "sk-yault-..."
+      }
+    }
+  }
 }
 ```
 
-## Sub-path Imports
+### Add to Claude Code
 
-Each module is available as a separate entry point for tree-shaking:
+```bash
+claude mcp add yault -- npx -y @yault/aesp
+```
+
+Then set the environment variable `YAULT_API_KEY` in your shell or `.claude/settings.json`.
+
+### Run standalone
+
+```bash
+export YAULT_API_KEY="sk-yault-..."
+yault-mcp                  # if installed globally
+npx @yault/aesp            # via npx
+```
+
+### Get your API key
+
+Go to [yault.xyz](https://yault.xyz) to create an account and obtain your API key (`sk-yault-*`). The key is tied to your vault — each user manages their own key. Agent developers do not need a key unless they are also vault users; it is the end-user who configures their own key in the MCP client.
+
+### Use SDK modules
 
 ```typescript
-import { PolicyEngine } from '@yallet/aesp/policy';
-import { AddressPoolManager } from '@yallet/aesp/privacy';
-import { getAllMCPTools } from '@yallet/aesp/mcp';
-import { AgentCardBuilder } from '@yallet/aesp/a2a';
-import type { AgentPolicy, EIP712Commitment } from '@yallet/aesp/types';
+import { PolicyEngine } from '@yault/aesp/policy';
+import { getAllMCPTools } from '@yault/aesp/mcp';
+import { NegotiationStateMachine } from '@yault/aesp/negotiation';
+
+const engine = new PolicyEngine(storageAdapter);
+await engine.load();
+
+const tools = getAllMCPTools(); // 6 MCP tool definitions
 ```
+
+## Modules
+
+AESP is organized into subpath exports so you can import only what you need:
+
+| Subpath | Description |
+|---------|-------------|
+| `@yault/aesp` | Unified re-export of all modules |
+| `@yault/aesp/types` | Shared type definitions (`AgentExecutionRequest`, `TransferPayload`, `ChainId`, etc.) |
+| `@yault/aesp/policy` | Policy engine with 8-check evaluation, budget tracking, and policy change classification |
+| `@yault/aesp/identity` | Agent identity derivation, certificate creation, and hierarchy management |
+| `@yault/aesp/negotiation` | Offer/counter-offer state machine with session management |
+| `@yault/aesp/commitment` | EIP-712 structured commitment builder for dual-signed agreements |
+| `@yault/aesp/review` | Human-in-the-loop review queue with freeze/unfreeze controls |
+| `@yault/aesp/mcp` | MCP tool definitions, argument validation, and server router |
+| `@yault/aesp/a2a` | Agent-card builder for cross-agent discovery (A2A protocol) |
+| `@yault/aesp/crypto` | Cryptographic helpers: signing, encryption, hashing, ZK proof bridge |
+| `@yault/aesp/privacy` | Context tagging, ephemeral address pools, and consolidation scheduling |
 
 ## MCP Tools
 
-AESP exposes 8 MCP tools for integration with any MCP-compatible AI framework:
+The stdio server exposes 6 backend-connected tools:
 
-| Tool | Description |
-|---|---|
-| `yault_check_balance` | Check agent account balance |
-| `yault_deposit` | Deposit to ERC-4626 vault |
-| `yault_redeem` | Redeem vault shares |
-| `yault_create_allowance` | Create one-time or recurring allowance |
-| `yault_cancel_allowance` | Cancel an existing allowance |
-| `yault_file_dispute` | File on-chain dispute with evidence |
-| `yault_check_budget` | Check remaining daily/weekly/monthly budget |
-| `yault_list_agents` | List sub-agents with status and budget |
+| Tool | Method + Endpoint | Purpose |
+|------|-------------------|---------|
+| `yault_check_balance` | `GET /api/vault/balance/:address` | Read a wallet vault balance |
+| `yault_deposit` | `POST /api/vault/deposit` | Deposit underlying into vault |
+| `yault_redeem` | `POST /api/vault/redeem` | Redeem vault shares |
+| `yault_transfer` | `POST /api/vault/transfer` | Transfer vault allocation (parent to sub-account) |
+| `yault_check_authorization` | `GET /api/vault/agent-authorization` | Read operator/allowance status |
+| `yault_get_balances` | `GET /api/vault/balances/:address` | Read multi-balance breakdown |
 
-## Protocol Flow
+### Backend Requirements
 
-A typical agent-to-agent transaction follows this path:
+The MCP server is a thin API client. It expects a Yault backend providing:
 
-```
-Agent A starts negotiation  ──→  Agent B receives offer
-                                        │
-        ┌───────────────────────────────┘
-        ↓
-Counter-offers exchanged (E2E encrypted)
-        │
-        ↓
-Both accept  ──→  Agreement hash computed
-        │
-        ↓
-EIP-712 commitment created & dual-signed
-        │
-        ↓
-PolicyEngine.checkAutoApprove()
-        │
-   ┌────┴────┐
-   ↓         ↓
-Approved   Violation → ReviewManager → Human approves on mobile
-   │                                        │
-   └────────────────┬───────────────────────┘
-                    ↓
-        Execution recorded → Audit trail
-        (Privacy: routed through ephemeral addresses)
-```
+- `GET /api/vault/balance/:address`
+- `GET /api/vault/balances/:address`
+- `GET /api/vault/agent-authorization`
+- `POST /api/vault/deposit` -- `{ address, amount }`
+- `POST /api/vault/redeem` -- `{ address, shares }`
+- `POST /api/vault/transfer` -- `{ from_address, to_address, amount, currency? }`
 
-## Privacy Architecture
+Authentication: `Authorization: Bearer sk-yault-*` via `YAULT_API_KEY` env variable.
 
-AESP implements context-isolated privacy to prevent on-chain correlation:
+## Security Model
 
-- **Ephemeral addresses** — HKDF-derived from the master wallet per transaction context (agent + chain + counterparty + direction). Each address is used once.
-- **Consolidation scheduler** — Batches ephemeral address funds back to the vault with randomized timing jitter (±30%) and Fisher-Yates address shuffle to resist chain analysis.
-- **Audit context tags** — Every ephemeral transaction is tagged with encrypted metadata (agent, policy, commitment) and archived to Arweave. Batching strategies (immediate / time window / count threshold) amortize archiving costs.
+AESP is built around "bounded autonomy":
 
-## WASM Crypto Backend
+- Agent API keys should be policy-bound before spend execution.
+- Spending controls should include per-tx and rolling limits (daily/weekly/monthly).
+- Destination constraints should be allowlist-driven where applicable.
+- Sensitive operations should stay outside broad agent key scopes.
+- Human escalation remains the fallback for policy violations.
 
-AESP uses [acegf-wallet](https://github.com/AcegfWallet) (Rust → WASM) for cryptographic operations:
+For vulnerability reporting, see [SECURITY.md](./SECURITY.md).
 
-- Ed25519 signing and verification (Solana-compatible)
-- secp256k1 signing (EVM-compatible)
-- EIP-712 typed data signing
-- HKDF context-isolated key derivation (REV32)
-- SHA-256 hashing (with Web Crypto API fallback)
+## Related Packages
 
-## Supported Chains
+| Package | Description |
+|---------|-------------|
+| [`@yault/elizaos-plugin-aesp`](https://github.com/ya-xyz/elizaos-plugin-aesp) | ElizaOS plugin wrapping AESP for agent frameworks |
 
-Solana, Ethereum, Polygon, Base, Arbitrum, Bitcoin.
+## Development
 
-## Testing
+Run tests:
 
 ```bash
-npm test            # Run all tests (vitest)
-npm run test:watch  # Watch mode
+npm test
 ```
 
-208 tests across 9 test suites covering all modules.
-
-## Building
+Build TypeScript:
 
 ```bash
-npm run build:wasm  # Build WASM from acegf-wallet Rust source
-npm run build:ts    # Compile TypeScript
-npm run build       # Full build (WASM + TS)
+npm run build:ts
 ```
 
-## Project Structure
+Build with WASM (requires [acegf-wallet](https://github.com/ya-xyz/acegf-wallet) as a sibling repo, or set `ACEGF_ROOT`):
 
-```
-src/
-├── types/          # Shared type definitions
-├── crypto/         # WASM bridge, signing, encryption, hashing
-├── identity/       # Agent derivation, certificates, hierarchy
-├── policy/         # Policy engine, budget tracker
-├── negotiation/    # FSM, E2E encrypted negotiation protocol
-├── commitment/     # EIP-712 commitment builder
-├── review/         # Human-in-the-loop approval queue
-├── mcp/            # MCP tool definitions and server
-├── a2a/            # A2A agent card builder
-└── privacy/        # Ephemeral addresses, context tags, consolidation
-docs/               # Architecture docs, scenarios, risk analysis
-wasm/               # Pre-built WASM binaries (acegf)
-tests/              # Vitest test suites
+```bash
+npm run build:wasm
+npm run build:ts
 ```
 
-## Documentation
-
-Detailed architecture documents are available in the [`docs/`](./docs/) directory, covering:
-
-- Agentic economy vision and agent design patterns
-- Agent hierarchy and mobile approval flows
-- Yault settlement layer architecture
-- Privacy features and context isolation
-- Risk analysis and mitigation strategies
-- Platform-level regulatory and liquidity risk recommendations
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full development guide.
 
 ## License
 
-This project is licensed under the **Business Source License 1.1 (BSL-1.1)**. See [LICENSE](./LICENSE) for the full text.
-
-- **Summary:** You may copy, modify, create derivative works, and redistribute the code for **non-production use**. Production use requires a commercial license from the Licensor or compliance with the license terms.
-- **Change Date:** On **2030-01-01**, or the fourth anniversary of the first public distribution of this version (whichever is earlier), this code will become available under **GPL-2.0-or-later**.
-- BSL is not an Open Source license until the Change Date; see [MariaDB BSL 1.1](https://mariadb.com/bsl11/) for details.
+This project is licensed under the **Apache License 2.0**. See [LICENSE](./LICENSE) for the full text.

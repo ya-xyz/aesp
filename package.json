@@ -1,10 +1,21 @@
 {
-  "name": "@yallet/aesp",
-  "version": "0.1.0",
+  "name": "@yault/aesp",
+  "version": "0.1.1",
   "description": "Agent Economic Sovereignty Protocol — defining how AI agents operate economically under human sovereignty",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "mcpName": "xyz.yault/aesp",
+  "bin": {
+    "yault-mcp": "dist/mcp/stdio-server.js"
+  },
+  "files": [
+    "dist",
+    "wasm",
+    "server.json",
+    "LICENSE",
+    "README.md"
+  ],
   "exports": {
     ".": {
       "import": "./dist/index.js",
@@ -52,15 +63,16 @@
     }
   },
   "scripts": {
-    "build:wasm": "/Users/jwang/dev.y/dev.acegf-wallet/scripts/build-wasm.sh release && cp /Users/jwang/dev.y/dev.acegf-wallet/pkg/{acegf.js,acegf.d.ts,acegf_bg.wasm,acegf_bg.wasm.d.ts} wasm/",
+    "build:wasm": "./scripts/build-wasm.sh release",
     "build:ts": "tsc",
     "build": "npm run build:wasm && npm run build:ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "lint": "eslint src/",
+    "mcp:serve": "node dist/mcp/stdio-server.js",
     "clean": "rm -rf dist/",
-    "prepublishOnly": "npm run clean && npm run build"
+    "prepublishOnly": "npm run clean && npm run build:ts"
   },
   "keywords": [
     "aesp",
@@ -78,12 +90,21 @@
     "ephemeral-address"
   ],
   "author": "Yallet",
-  "license": "BUSL-1.1",
+  "license": "Apache-2.0",
+  "homepage": "https://yault.xyz",
+  "engines": {
+    "node": ">=18"
+  },
   "devDependencies": {
+    "@types/node": "^25.4.0",
     "eslint": "^9.18.0",
     "prettier": "^3.4.2",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.56.1",
     "vitest": "^4.0.18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "zod": "^3.25 || ^4.0"
   }
 }

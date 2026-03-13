@@ -11,7 +11,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-ACEGF_ROOT="/Users/jwang/dev.y/dev.acegf-wallet"
+ACEGF_ROOT="${ACEGF_ROOT:-$(cd "$SCRIPT_DIR/../../dev.acegf-wallet" 2>/dev/null && pwd)}"
+if [ -z "$ACEGF_ROOT" ] || [ ! -d "$ACEGF_ROOT" ]; then
+  echo "❌ Error: acegf-wallet not found."
+  echo "   Set ACEGF_ROOT env variable or place the repo at ../dev.acegf-wallet"
+  exit 1
+fi
 WASM_OUT="$PROJECT_ROOT/wasm"
 
 MODE="${1:-release}"
@@ -19,12 +24,6 @@ MODE="${1:-release}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  AESP — Building acegf-wallet WASM ($MODE)"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
-# Check acegf-wallet exists
-if [ ! -d "$ACEGF_ROOT" ]; then
-  echo "❌ Error: acegf-wallet not found at $ACEGF_ROOT"
-  exit 1
-fi
 
 # Build WASM
 echo "🔨 Building WASM..."

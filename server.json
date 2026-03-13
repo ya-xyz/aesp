@@ -1,0 +1,38 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "xyz.yault/aesp",
+  "title": "Yault AESP",
+  "description": "Crypto payments for the agent economy — policy-gated vault operations under human control",
+  "version": "0.1.1",
+  "websiteUrl": "https://yault.xyz",
+  "repository": {
+    "url": "https://github.com/ya-xyz/aesp",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@yault/aesp",
+      "version": "0.1.1",
+      "runtimeHint": "node",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "YAULT_API_KEY",
+          "description": "Your Yault API key (obtain from https://yault.xyz). Format: sk-yault-*",
+          "isRequired": true,
+          "isSecret": true
+        },
+        {
+          "name": "YAULT_API_URL",
+          "description": "Yault backend base URL",
+          "isRequired": false,
+          "isSecret": false,
+          "default": "https://api.yault.xyz"
+        }
+      ]
+    }
+  ]
+}
