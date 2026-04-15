@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "yault-aesp",
   "display_name": "Yault AESP",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Crypto payments for the agent economy — policy-gated vault operations under human control",
   "long_description": "AESP brings crypto payments to the agent economy. AI agents can deposit, redeem, transfer, and query on-chain vault balances — all gated by human-defined spend policies.\n\nEvery financial action passes through a policy engine that enforces per-transaction limits, rolling budgets (daily/weekly/monthly), destination allowlists, and time-window constraints. Actions that exceed thresholds are escalated to a human review queue — not silently executed.\n\nBuilt on Yault's ERC-4626 vault infrastructure, AESP gives agents real economic capability while keeping humans sovereign over every dollar spent.\n\nWhat agents can do:\n- Deposit and redeem assets in yield-generating vaults\n- Transfer allocations between parent and sub-accounts\n- Check balances, authorization status, and yield breakdowns\n- Operate within budgets and allowlists set by their human operators\n\nWhat humans control:\n- Per-transaction and rolling spend limits\n- Approved destination addresses\n- Time-window restrictions\n- Escalation rules for high-risk actions\n\nGet your API key at https://yault.xyz to connect your vault.",
   "author": {
@@ -40,7 +40,8 @@
     { "name": "yault_redeem", "description": "Redeem vault shares back to underlying assets" },
     { "name": "yault_transfer", "description": "Transfer vault allocation between accounts" },
     { "name": "yault_check_authorization", "description": "Check agent operator and allowance status" },
-    { "name": "yault_get_balances", "description": "Get comprehensive balance breakdown including yield" }
+    { "name": "yault_get_balances", "description": "Get comprehensive balance breakdown including yield" },
+    { "name": "yault_send_payment", "description": "Send a payment to an arbitrary wallet address" }
   ],
   "user_config": {
     "api_key": {
